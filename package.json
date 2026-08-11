@@ -1,0 +1,20 @@
+{
+  "name": "smeta-market",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run build --workspace @smeta/shared && concurrently -n api,web -c magenta,cyan \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "npm run dev --workspace @smeta/api",
+    "dev:web": "npm run dev --workspace @smeta/web",
+    "build": "npm run build --workspace @smeta/shared && npm run build --workspace @smeta/api && npm run build --workspace @smeta/web",
+    "typecheck": "npm run typecheck --workspace @smeta/shared && npm run typecheck --workspace @smeta/api && npm run typecheck --workspace @smeta/web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
+  }
+}
