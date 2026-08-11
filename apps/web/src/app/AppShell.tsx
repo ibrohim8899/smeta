@@ -1,4 +1,5 @@
-import { Bell } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Bell, Moon, Sun } from "lucide-react";
 import { APP_TIMEZONE } from "@smeta/shared";
 import { IconButton } from "../components/ui/IconButton";
 import { SearchBox } from "../components/ui/SearchBox";
@@ -12,16 +13,34 @@ type AppShellProps = {
 };
 
 export function AppShell({ activeView, children, onViewChange }: AppShellProps) {
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+
+  useEffect(() => {
+    const storedTheme = window.localStorage.getItem("smeta-theme");
+    const preferredDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
+    const initialTheme = storedTheme === "dark" || storedTheme === "light" ? storedTheme : preferredDark ? "dark" : "light";
+
+    setTheme(initialTheme);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem("smeta-theme", theme);
+  }, [theme]);
+
+  const nextTheme = theme === "dark" ? "light" : "dark";
+
   return (
-    <main className="min-h-screen bg-smeta-paper text-smeta-ink">
-      <div className="grid min-h-screen lg:grid-cols-[248px_1fr]">
-        <aside className="border-b border-smeta-line bg-smeta-ink px-4 py-4 text-white lg:border-b-0 lg:border-r">
+    <main className="min-h-screen bg-smeta-paper text-smeta-ink" data-theme={theme}>
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top_right,_rgb(var(--smeta-blush)/0.20),_transparent_34%),radial-gradient(circle_at_bottom_left,_rgb(var(--smeta-rose)/0.15),_transparent_32%)]" />
+      <div className="relative grid min-h-screen lg:grid-cols-[272px_1fr]">
+        <aside className="border-b border-smeta-line bg-smeta-deep px-4 py-4 text-white shadow-smeta lg:border-b-0 lg:border-r">
           <div className="flex items-center justify-between lg:block">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-smeta-blush">Smeta Market</p>
-              <h1 className="mt-2 text-xl font-semibold">V1 boshqaruv</h1>
+              <h1 className="mt-2 text-2xl font-semibold tracking-tight">V1 boshqaruv</h1>
             </div>
-            <div className="rounded-md border border-white/15 px-3 py-2 text-xs text-smeta-blush lg:mt-6">
+            <div className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-smeta-blush lg:mt-6">
               {APP_TIMEZONE}
             </div>
           </div>
@@ -32,8 +51,8 @@ export function AppShell({ activeView, children, onViewChange }: AppShellProps) 
               return (
                 <button
                   key={key}
-                  className={`flex min-w-fit items-center gap-3 rounded-md px-3 py-3 text-left text-sm transition ${
-                    active ? "bg-smeta-clay text-white" : "text-smeta-blush hover:bg-white/8"
+                  className={`flex min-w-fit items-center gap-3 rounded-xl px-3 py-3 text-left text-sm transition ${
+                    active ? "bg-smeta-clay text-white" : "text-smeta-blush"
                   }`}
                   onClick={() => onViewChange(key)}
                 >
@@ -46,20 +65,23 @@ export function AppShell({ activeView, children, onViewChange }: AppShellProps) 
         </aside>
 
         <section className="min-w-0">
-          <header className="flex flex-col gap-4 border-b border-smeta-line bg-white px-5 py-4 lg:flex-row lg:items-center lg:justify-between lg:px-7">
+          <header className="sticky top-0 z-10 flex flex-col gap-4 border-b border-smeta-line bg-smeta-surface/90 px-5 py-4 backdrop-blur lg:flex-row lg:items-center lg:justify-between lg:px-7">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-smeta-mauve">Xarid jarayoni</p>
               <h2 className="mt-1 text-2xl font-semibold">Material so'rovidan to'lovgacha</h2>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <SearchBox />
+              <IconButton label={theme === "dark" ? "Light mode" : "Dark mode"} onClick={() => setTheme(nextTheme)}>
+                {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              </IconButton>
               <IconButton label="Bildirishnomalar" onClick={() => onViewChange("notifications")}>
                 <Bell className="h-4 w-4" />
               </IconButton>
             </div>
           </header>
 
-          <div className="px-5 py-5 lg:px-7">{children}</div>
+          <div className="mx-auto max-w-[1680px] px-5 py-5 lg:px-7">{children}</div>
         </section>
       </div>
     </main>

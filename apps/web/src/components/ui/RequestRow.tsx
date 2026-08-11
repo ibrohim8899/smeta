@@ -7,7 +7,7 @@ type RequestRowProps = {
 
 export function RequestRow({ request }: RequestRowProps) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-md border border-smeta-line bg-white px-3 py-3">
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-smeta-line bg-smeta-surface px-3 py-3 shadow-smeta-soft">
       <div className="min-w-0">
         <p className="truncate text-sm font-semibold">
           {request.id} · {request.customer}

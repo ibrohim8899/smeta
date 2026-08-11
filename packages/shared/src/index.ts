@@ -53,6 +53,8 @@ export const PERMISSIONS = [
   "requests.read",
   "requests.moderate",
   "requests.assign_stores",
+  "stores.read",
+  "stores.manage",
   "offers.create",
   "offers.read",
   "offers.select",
@@ -64,6 +66,8 @@ export const PERMISSIONS = [
   "finance.read",
   "finance.record_payment",
   "audit.read",
+  "notifications.read",
+  "notifications.manage",
   "settings.manage"
 ] as const;
 
@@ -74,16 +78,20 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "requests.read",
     "requests.moderate",
     "requests.assign_stores",
+    "stores.read",
+    "stores.manage",
     "offers.read",
     "orders.read",
     "dealers.read",
     "dealers.moderate",
-    "audit.read"
+    "audit.read",
+    "notifications.read",
+    "notifications.manage"
   ],
   customer: ["requests.create", "requests.read", "offers.read", "offers.select", "orders.read"],
   dealer: ["requests.create", "requests.read", "dealers.apply", "orders.read"],
-  finance: ["orders.read", "finance.read", "finance.record_payment", "audit.read"],
-  store: ["requests.read", "offers.create", "offers.read", "orders.read", "orders.fulfill"],
+  finance: ["orders.read", "finance.read", "finance.record_payment", "audit.read", "notifications.read"],
+  store: ["requests.read", "stores.read", "offers.create", "offers.read", "orders.read", "orders.fulfill"],
   superadmin: [...PERMISSIONS]
 };
 

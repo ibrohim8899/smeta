@@ -20,6 +20,10 @@ const permissionLabels: Record<string, string> = {
   "requests.create": "Material so'rovi yaratish",
   "requests.moderate": "So'rovni moderatsiya qilish",
   "requests.read": "So'rovlarni ko'rish",
+  "stores.manage": "Do'konlarni boshqarish",
+  "stores.read": "Do'konlarni ko'rish",
+  "notifications.manage": "Bildirishnomalarni boshqarish",
+  "notifications.read": "Bildirishnomalarni ko'rish",
   "settings.manage": "Tizim sozlamalarini boshqarish"
 };
 
@@ -80,8 +84,8 @@ export function SecurityView() {
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-smeta-mauve">Auth va rollar</p>
             <h3 className="mt-1 text-xl font-semibold">Rol ruxsatlari skeletoni</h3>
             <p className="mt-2 text-sm leading-6 text-smeta-mauve">
-              Bu sahifa hozircha lokal rol preview sifatida ishlaydi. Keyingi auth etapida Telegram Mini App initData va real sessiya shu
-              permission matritsaga ulanadi.
+              Bu sahifa hozircha lokal rol preview sifatida ishlaydi. Frontend API chaqiruvlari dev rejimda `x-smeta-role` headerini yuboradi;
+              keyingi auth etapida Telegram Mini App initData va real sessiya shu permission matritsaga ulanadi.
             </p>
           </div>
         </div>
@@ -131,7 +135,7 @@ export function SecurityView() {
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-smeta-mauve">Audit</p>
             <h3 className="mt-1 text-xl font-semibold">Oxirgi tizim harakatlari</h3>
           </div>
-          <button className="rounded-md bg-smeta-ink px-3 py-2 text-sm font-semibold text-white" onClick={() => void loadSecurityData()}>
+          <button className="rounded-md bg-smeta-deep px-3 py-2 text-sm font-semibold text-white" onClick={() => void loadSecurityData()}>
             Yangilash
           </button>
         </div>

@@ -1,4 +1,18 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
+const API_ROLE_HEADER = import.meta.env.VITE_SMETA_ROLE ?? "superadmin";
+
+function authHeaders(headers?: Record<string, string>) {
+  return {
+    "x-smeta-role": API_ROLE_HEADER,
+    ...headers
+  };
+}
+
+function jsonHeaders() {
+  return authHeaders({
+    "Content-Type": "application/json"
+  });
+}
 
 export type AuthSessionResponse = {
   accountStatus: string;
@@ -193,9 +207,7 @@ export type FinanceSummaryResponse = {
 export async function createMaterialRequest(payload: CreateMaterialRequestPayload): Promise<MaterialRequestResponse> {
   const response = await fetch(`${API_BASE_URL}/material-requests`, {
     body: JSON.stringify(payload),
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers: jsonHeaders(),
     method: "POST"
   });
 
@@ -212,7 +224,7 @@ export async function fetchAuthSession(role?: string): Promise<AuthSessionRespon
     ? {
         "x-smeta-role": role
       }
-    : undefined;
+    : authHeaders();
   const response = await fetch(`${API_BASE_URL}/auth/me`, {
     headers
   });
@@ -226,7 +238,9 @@ export async function fetchAuthSession(role?: string): Promise<AuthSessionRespon
 }
 
 export async function fetchPermissionMatrix(): Promise<PermissionMatrixResponse> {
-  const response = await fetch(`${API_BASE_URL}/auth/permissions`);
+  const response = await fetch(`${API_BASE_URL}/auth/permissions`, {
+    headers: authHeaders()
+  });
 
   if (!response.ok) {
     const message = await response.text();
@@ -237,7 +251,9 @@ export async function fetchPermissionMatrix(): Promise<PermissionMatrixResponse>
 }
 
 export async function fetchAuditLogs(limit = 80): Promise<AuditLogResponse[]> {
-  const response = await fetch(`${API_BASE_URL}/audit?limit=${limit}`);
+  const response = await fetch(`${API_BASE_URL}/audit?limit=${limit}`, {
+    headers: authHeaders()
+  });
 
   if (!response.ok) {
     const message = await response.text();
@@ -256,7 +272,9 @@ export async function fetchNotifications(limit = 100, status?: string): Promise<
     params.set("status", status);
   }
 
-  const response = await fetch(`${API_BASE_URL}/notifications?${params.toString()}`);
+  const response = await fetch(`${API_BASE_URL}/notifications?${params.toString()}`, {
+    headers: authHeaders()
+  });
 
   if (!response.ok) {
     const message = await response.text();
@@ -277,9 +295,7 @@ export async function createNotification(payload: {
 }): Promise<NotificationResponse> {
   const response = await fetch(`${API_BASE_URL}/notifications`, {
     body: JSON.stringify(payload),
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers: jsonHeaders(),
     method: "POST"
   });
 
@@ -297,9 +313,7 @@ export async function updateNotificationStatus(id: string, status: string, error
       error,
       status
     }),
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers: jsonHeaders(),
     method: "PATCH"
   });
 
@@ -342,6 +356,7 @@ export async function createMaterialRequestWithFiles(
 
   const response = await fetch(`${API_BASE_URL}/material-requests/with-files`, {
     body: formData,
+    headers: authHeaders(),
     method: "POST"
   });
 
@@ -354,7 +369,9 @@ export async function createMaterialRequestWithFiles(
 }
 
 export async function fetchMaterialRequests(): Promise<MaterialRequestResponse[]> {
-  const response = await fetch(`${API_BASE_URL}/material-requests`);
+  const response = await fetch(`${API_BASE_URL}/material-requests`, {
+    headers: authHeaders()
+  });
 
   if (!response.ok) {
     const message = await response.text();
@@ -370,9 +387,7 @@ export async function updateMaterialRequestStatus(id: string, status: string, no
       note,
       status
     }),
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers: jsonHeaders(),
     method: "PATCH"
   });
 
@@ -390,6 +405,7 @@ export function getAttachmentDownloadUrl(requestId: string, attachmentId: string
 
 export async function cancelMaterialRequest(id: string): Promise<MaterialRequestResponse> {
   const response = await fetch(`${API_BASE_URL}/material-requests/${id}`, {
+    headers: authHeaders(),
     method: "DELETE"
   });
 
@@ -402,7 +418,9 @@ export async function cancelMaterialRequest(id: string): Promise<MaterialRequest
 }
 
 export async function fetchStores(): Promise<StoreResponse[]> {
-  const response = await fetch(`${API_BASE_URL}/stores`);
+  const response = await fetch(`${API_BASE_URL}/stores`, {
+    headers: authHeaders()
+  });
 
   if (!response.ok) {
     const message = await response.text();
@@ -417,9 +435,7 @@ export async function assignStoresToRequest(requestId: string, storeIds?: string
     body: JSON.stringify({
       storeIds
     }),
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers: jsonHeaders(),
     method: "POST"
   });
 
@@ -432,7 +448,9 @@ export async function assignStoresToRequest(requestId: string, storeIds?: string
 }
 
 export async function fetchStoreOffers(requestId: string): Promise<StoreOfferResponse[]> {
-  const response = await fetch(`${API_BASE_URL}/material-requests/${requestId}/offers`);
+  const response = await fetch(`${API_BASE_URL}/material-requests/${requestId}/offers`, {
+    headers: authHeaders()
+  });
 
   if (!response.ok) {
     const message = await response.text();
@@ -454,9 +472,7 @@ export async function createStoreOffer(
 ): Promise<StoreOfferResponse> {
   const response = await fetch(`${API_BASE_URL}/material-requests/${requestId}/offers`, {
     body: JSON.stringify(payload),
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers: jsonHeaders(),
     method: "POST"
   });
 
@@ -470,6 +486,7 @@ export async function createStoreOffer(
 
 export async function selectOffer(requestId: string, offerId: string): Promise<OrderResponse> {
   const response = await fetch(`${API_BASE_URL}/material-requests/${requestId}/select-offer/${offerId}`, {
+    headers: authHeaders(),
     method: "POST"
   });
 
@@ -482,7 +499,9 @@ export async function selectOffer(requestId: string, offerId: string): Promise<O
 }
 
 export async function fetchOrderByRequest(requestId: string): Promise<OrderResponse | null> {
-  const response = await fetch(`${API_BASE_URL}/material-requests/${requestId}/order`);
+  const response = await fetch(`${API_BASE_URL}/material-requests/${requestId}/order`, {
+    headers: authHeaders()
+  });
 
   if (!response.ok) {
     const message = await response.text();
@@ -493,7 +512,9 @@ export async function fetchOrderByRequest(requestId: string): Promise<OrderRespo
 }
 
 export async function fetchOrders(): Promise<OrderResponse[]> {
-  const response = await fetch(`${API_BASE_URL}/orders`);
+  const response = await fetch(`${API_BASE_URL}/orders`, {
+    headers: authHeaders()
+  });
 
   if (!response.ok) {
     const message = await response.text();
@@ -509,9 +530,7 @@ export async function updateOrderStatus(orderId: string, status: string, note?: 
       note,
       status
     }),
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers: jsonHeaders(),
     method: "PATCH"
   });
 
@@ -524,7 +543,9 @@ export async function updateOrderStatus(orderId: string, status: string, note?: 
 }
 
 export async function fetchFinanceLedger(): Promise<FinanceLedgerResponse[]> {
-  const response = await fetch(`${API_BASE_URL}/finance/ledger`);
+  const response = await fetch(`${API_BASE_URL}/finance/ledger`, {
+    headers: authHeaders()
+  });
 
   if (!response.ok) {
     const message = await response.text();
@@ -535,7 +556,9 @@ export async function fetchFinanceLedger(): Promise<FinanceLedgerResponse[]> {
 }
 
 export async function fetchFinanceSummary(): Promise<FinanceSummaryResponse> {
-  const response = await fetch(`${API_BASE_URL}/finance/summary`);
+  const response = await fetch(`${API_BASE_URL}/finance/summary`, {
+    headers: authHeaders()
+  });
 
   if (!response.ok) {
     const message = await response.text();
@@ -551,9 +574,7 @@ export async function recordFinancePayment(ledgerId: string, amountUzs: number, 
       amountUzs,
       note
     }),
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers: jsonHeaders(),
     method: "PATCH"
   });
 
@@ -566,7 +587,9 @@ export async function recordFinancePayment(ledgerId: string, amountUzs: number, 
 }
 
 export async function fetchDealers(): Promise<DealerResponse[]> {
-  const response = await fetch(`${API_BASE_URL}/dealers`);
+  const response = await fetch(`${API_BASE_URL}/dealers`, {
+    headers: authHeaders()
+  });
 
   if (!response.ok) {
     const message = await response.text();
@@ -584,9 +607,7 @@ export async function createDealer(payload: {
 }): Promise<DealerResponse> {
   const response = await fetch(`${API_BASE_URL}/dealers`, {
     body: JSON.stringify(payload),
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers: jsonHeaders(),
     method: "POST"
   });
 
@@ -608,9 +629,7 @@ export async function updateDealerStatus(
 ): Promise<DealerResponse> {
   const response = await fetch(`${API_BASE_URL}/dealers/${dealerId}/status`, {
     body: JSON.stringify(payload),
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers: jsonHeaders(),
     method: "PATCH"
   });
 

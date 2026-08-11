@@ -35,7 +35,7 @@ export function RequestDetails({ request }: RequestDetailsProps) {
                 <div className="flex flex-wrap items-center gap-2">
                   <StatusPill label={file.scanStatus} />
                   {file.downloadUrl ? (
-                    <a className="rounded-md bg-smeta-ink px-3 py-2 text-xs font-semibold text-white" href={file.downloadUrl}>
+                    <a className="rounded-md bg-smeta-deep px-3 py-2 text-xs font-semibold text-white" href={file.downloadUrl}>
                       Yuklab olish
                     </a>
                   ) : (

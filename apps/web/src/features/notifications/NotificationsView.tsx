@@ -94,7 +94,7 @@ export function NotificationsView() {
               </p>
             </div>
           </div>
-          <button className="inline-flex items-center gap-2 rounded-md bg-smeta-ink px-4 py-2 text-sm font-semibold text-white" onClick={handleCreateTestNotification}>
+          <button className="inline-flex items-center gap-2 rounded-md bg-smeta-deep px-4 py-2 text-sm font-semibold text-white" onClick={handleCreateTestNotification}>
             <Send className="h-4 w-4" />
             Test yaratish
           </button>
@@ -156,7 +156,7 @@ export function NotificationsView() {
                   {notification.lastError ? <p className="mt-2 text-sm text-red-700">Xato: {notification.lastError}</p> : null}
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2">
-                  <button className="rounded-md bg-smeta-ink px-3 py-2 text-xs font-semibold text-white" onClick={() => void handleStatusChange(notification.id, "sent")}>
+                  <button className="rounded-md bg-smeta-deep px-3 py-2 text-xs font-semibold text-white" onClick={() => void handleStatusChange(notification.id, "sent")}>
                     Yuborildi
                   </button>
                   <button

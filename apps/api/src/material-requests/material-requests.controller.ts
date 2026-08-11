@@ -17,6 +17,7 @@ import { createReadStream, existsSync, mkdirSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { diskStorage } from "multer";
 import type { Response } from "express";
+import { RequirePermissions } from "../auth/require-permissions.decorator";
 import { CreateMaterialRequestDto } from "./dto/create-material-request.dto";
 import {
   getSafeOriginalFileName,
@@ -36,11 +37,13 @@ export class MaterialRequestsController {
   constructor(private readonly materialRequestsService: MaterialRequestsService) {}
 
   @Post()
+  @RequirePermissions("requests.create")
   create(@Body() dto: CreateMaterialRequestDto) {
     return this.materialRequestsService.create(dto);
   }
 
   @Post("with-files")
+  @RequirePermissions("requests.create")
   @UseInterceptors(
     FilesInterceptor("attachments", MAX_REQUEST_FILES, {
       fileFilter: (_request, file, callback) => {
@@ -90,26 +93,31 @@ export class MaterialRequestsController {
   }
 
   @Get()
+  @RequirePermissions("requests.read")
   findAll() {
     return this.materialRequestsService.findAll();
   }
 
   @Patch(":id/status")
+  @RequirePermissions("requests.moderate")
   updateStatus(@Param("id") id: string, @Body() dto: UpdateMaterialRequestStatusDto) {
     return this.materialRequestsService.updateStatus(id, dto);
   }
 
   @Delete(":id")
+  @RequirePermissions("requests.moderate")
   cancel(@Param("id") id: string) {
     return this.materialRequestsService.cancel(id);
   }
 
   @Get(":id")
+  @RequirePermissions("requests.read")
   findOne(@Param("id") id: string) {
     return this.materialRequestsService.findOne(id);
   }
 
   @Get(":requestId/attachments/:attachmentId/download")
+  @RequirePermissions("requests.read")
   async downloadAttachment(@Param("requestId") requestId: string, @Param("attachmentId") attachmentId: string, @Res() response: Response) {
     const attachment = await this.materialRequestsService.getAttachmentForDownload(requestId, attachmentId);
     const baseUploadPath = resolve(uploadDir);

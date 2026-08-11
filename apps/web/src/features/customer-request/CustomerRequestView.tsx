@@ -59,17 +59,17 @@ export function CustomerRequestView({ onRequestCreated }: CustomerRequestViewPro
 
   return (
     <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
-      <section className="rounded-lg border border-smeta-line bg-white p-5 shadow-sm">
+      <section className="rounded-2xl border border-smeta-line bg-smeta-surface p-5 shadow-smeta">
         <div className="flex items-center gap-3">
           <UploadCloud className="h-5 w-5 text-smeta-clay" />
           <h3 className="text-lg font-semibold">Material ro'yxatini yuborish</h3>
         </div>
 
-        <label className="mt-5 block rounded-lg border border-dashed border-smeta-rose bg-smeta-soft px-5 py-8 text-center">
+        <label className="mt-5 block rounded-2xl border border-dashed border-smeta-rose bg-smeta-soft px-5 py-8 text-center shadow-smeta-soft">
           <UploadCloud className="mx-auto h-9 w-9 text-smeta-clay" />
           <p className="mt-3 text-sm font-semibold">JPEG, PNG, PDF, XLS yoki XLSX</p>
           <p className="mt-1 text-xs text-smeta-mauve">10 tagacha fayl, har biri 20MB gacha</p>
-          <span className="mt-5 inline-flex rounded-md bg-smeta-ink px-4 py-2 text-sm font-semibold text-white">Fayl tanlash</span>
+          <span className="mt-5 inline-flex rounded-xl bg-smeta-deep px-4 py-2 text-sm font-semibold text-white shadow-smeta-soft">Fayl tanlash</span>
           <input
             className="sr-only"
             multiple
@@ -97,7 +97,7 @@ export function CustomerRequestView({ onRequestCreated }: CustomerRequestViewPro
         <label className="mt-3 block">
           <span className="text-xs font-semibold text-smeta-mauve">Izoh</span>
           <textarea
-            className="mt-1 min-h-24 w-full rounded-md border border-smeta-line bg-white px-3 py-2 text-sm font-medium outline-none"
+            className="mt-1 min-h-24 w-full rounded-xl border border-smeta-line bg-smeta-surface px-3 py-2 text-sm font-medium outline-none"
             value={description}
             onChange={(event) => setDescription(event.target.value)}
           />
@@ -120,7 +120,7 @@ export function CustomerRequestView({ onRequestCreated }: CustomerRequestViewPro
         </button>
       </section>
 
-      <section className="rounded-lg border border-smeta-line bg-white p-5 shadow-sm">
+      <section className="rounded-2xl border border-smeta-line bg-smeta-surface p-5 shadow-smeta">
         <h3 className="text-lg font-semibold">Mijoz ko'radigan statuslar</h3>
         <div className="mt-5 space-y-4">
           {customerSteps.map((step, index) => (

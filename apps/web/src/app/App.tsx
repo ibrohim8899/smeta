@@ -97,7 +97,7 @@ function EmptyRequestState({ onCreateRequest }: { onCreateRequest: () => void })
       <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-smeta-mauve">
         Bu sahifa real baza bilan ishlaydi. Avval mijoz so'rovini yarating, keyin admin, do'kon taklifi va mijoz tanlovi oqimi ochiladi.
       </p>
-      <button className="mt-4 rounded-md bg-smeta-ink px-4 py-2 text-sm font-semibold text-white" onClick={onCreateRequest}>
+      <button className="mt-4 rounded-md bg-smeta-deep px-4 py-2 text-sm font-semibold text-white" onClick={onCreateRequest}>
         Mijoz so'rovi yaratish
       </button>
     </section>

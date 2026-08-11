@@ -1,20 +1,28 @@
 import type { Config } from "tailwindcss";
 
 export default {
+  darkMode: ["class", '[data-theme="dark"]'],
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
         smeta: {
-          ink: "#211729",
-          mauve: "#7d5d70",
-          rose: "#b99aaa",
-          blush: "#e8bbb3",
-          clay: "#c9756f",
-          paper: "#f7f1f2",
-          soft: "#f1e8ea",
-          line: "#ddc8d0"
+          ink: "rgb(var(--smeta-ink) / <alpha-value>)",
+          mauve: "rgb(var(--smeta-muted) / <alpha-value>)",
+          rose: "rgb(var(--smeta-rose) / <alpha-value>)",
+          blush: "rgb(var(--smeta-blush) / <alpha-value>)",
+          clay: "rgb(var(--smeta-clay) / <alpha-value>)",
+          paper: "rgb(var(--smeta-paper) / <alpha-value>)",
+          soft: "rgb(var(--smeta-soft) / <alpha-value>)",
+          line: "rgb(var(--smeta-line) / <alpha-value>)",
+          surface: "rgb(var(--smeta-surface) / <alpha-value>)",
+          elevated: "rgb(var(--smeta-elevated) / <alpha-value>)",
+          deep: "#211729"
         }
+      },
+      boxShadow: {
+        smeta: "0 18px 50px rgb(var(--smeta-shadow) / 0.14)",
+        "smeta-soft": "0 10px 30px rgb(var(--smeta-shadow) / 0.10)"
       }
     }
   },
