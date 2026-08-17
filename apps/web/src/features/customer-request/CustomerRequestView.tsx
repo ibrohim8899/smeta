@@ -13,17 +13,19 @@ const customerSteps = [
 ];
 
 type CustomerRequestViewProps = {
+  initialDealerReferral?: string;
+  initialDealerReferralCode?: string;
   onRequestCreated: () => Promise<void>;
 };
 
-export function CustomerRequestView({ onRequestCreated }: CustomerRequestViewProps) {
-  const [customerName, setCustomerName] = useState("Ali Karimov");
-  const [phone, setPhone] = useState("+998 90 123 45 67");
-  const [region, setRegion] = useState("Namangan sh.");
-  const [category, setCategory] = useState("Qurilish materiallari");
-  const [dealerReferral, setDealerReferral] = useState("Usta Jamshid");
-  const [dealerReferralCode, setDealerReferralCode] = useState("USTA-JAM-24");
-  const [description, setDescription] = useState("Uy remonti uchun sement, g'isht, armatura va bo'yoq kerak.");
+export function CustomerRequestView({ initialDealerReferral, initialDealerReferralCode, onRequestCreated }: CustomerRequestViewProps) {
+  const [customerName, setCustomerName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [region, setRegion] = useState("");
+  const [category, setCategory] = useState("");
+  const [dealerReferral, setDealerReferral] = useState(initialDealerReferral ?? "");
+  const [dealerReferralCode, setDealerReferralCode] = useState(initialDealerReferralCode ?? "");
+  const [description, setDescription] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [createdRequest, setCreatedRequest] = useState<MaterialRequestResponse | null>(null);
@@ -71,10 +73,10 @@ export function CustomerRequestView({ onRequestCreated }: CustomerRequestViewPro
           <p className="mt-1 text-xs text-smeta-mauve">10 tagacha fayl, har biri 20MB gacha</p>
           <span className="mt-5 inline-flex rounded-xl bg-smeta-deep px-4 py-2 text-sm font-semibold text-white shadow-smeta-soft">Fayl tanlash</span>
           <input
+            accept=".jpg,.jpeg,.png,.webp,.pdf,.xls,.xlsx"
             className="sr-only"
             multiple
             type="file"
-            accept=".jpg,.jpeg,.png,.webp,.pdf,.xls,.xlsx"
             onChange={(event) => setFiles(Array.from(event.target.files ?? []).slice(0, 10))}
           />
         </label>
@@ -83,7 +85,11 @@ export function CustomerRequestView({ onRequestCreated }: CustomerRequestViewPro
           <div className="mt-3 rounded-md bg-smeta-soft px-3 py-3 text-sm text-smeta-mauve">
             {files.length} ta fayl tanlandi: {files.map((file) => file.name).join(", ")}
           </div>
-        ) : null}
+        ) : (
+          <div className="mt-3 rounded-md bg-smeta-soft px-3 py-3 text-sm text-smeta-mauve">
+            Guest so'rov uchun kamida bitta material ro'yxati fayli majburiy.
+          </div>
+        )}
 
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
           <TextField label="Ism" value={customerName} onChange={setCustomerName} />
@@ -105,14 +111,25 @@ export function CustomerRequestView({ onRequestCreated }: CustomerRequestViewPro
 
         {error ? <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
         {createdRequest ? (
-          <p className="mt-3 rounded-md bg-smeta-soft px-3 py-2 text-sm font-semibold text-smeta-ink">
-            So'rov yaratildi: {createdRequest.publicCode} · {formatStatusLabel(createdRequest.status)}
-          </p>
+          <div className="mt-3 rounded-xl border border-smeta-line bg-smeta-soft px-3 py-3 text-sm text-smeta-ink">
+            <p className="font-semibold">
+              So'rov yaratildi: {createdRequest.publicCode} - {formatStatusLabel(createdRequest.status)}
+            </p>
+            {createdRequest.guestAccessUrl ? (
+              <a className="mt-2 block break-all text-xs font-semibold text-smeta-clay" href={createdRequest.guestAccessUrl}>
+                Secure status link: {createdRequest.guestAccessUrl}
+              </a>
+            ) : null}
+          </div>
         ) : null}
+
+        <p className="mt-3 rounded-xl border border-smeta-line bg-smeta-soft px-3 py-3 text-xs leading-5 text-smeta-mauve">
+          Fayllar faqat tasdiqlangan do'konlarga yuboriladi. Telefon va aniq manzil g'olib do'kon qabul qilmaguncha yashiriladi.
+        </p>
 
         <button
           className="mt-5 flex w-full items-center justify-center gap-2 rounded-md bg-smeta-clay px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={isSubmitting || !customerName || !region || !category}
+          disabled={isSubmitting || !customerName || !region || !category || files.length === 0}
           onClick={handleSubmit}
         >
           <Send className="h-4 w-4" />

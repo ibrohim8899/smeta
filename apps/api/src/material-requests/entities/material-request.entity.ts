@@ -25,6 +25,9 @@ export class MaterialRequestEntity {
   @Column({ type: "text", nullable: true })
   description!: string | null;
 
+  @Column({ name: "delivery_note", nullable: true, type: "text" })
+  deliveryNote!: string | null;
+
   @Column({ name: "dealer_referral", nullable: true, type: "varchar" })
   dealerReferral!: string | null;
 
@@ -45,6 +48,15 @@ export class MaterialRequestEntity {
 
   @Column({ name: "admin_note", nullable: true, type: "text" })
   adminNote!: string | null;
+
+  @Column({ name: "guest_token_hash", nullable: true, type: "varchar", unique: true })
+  guestTokenHash!: string | null;
+
+  @Column({ name: "guest_token_expires_at", nullable: true, type: "timestamptz" })
+  guestTokenExpiresAt!: Date | null;
+
+  @Column({ name: "guest_token_revoked_at", nullable: true, type: "timestamptz" })
+  guestTokenRevokedAt!: Date | null;
 
   @OneToMany(() => RequestAttachmentEntity, (attachment) => attachment.request, {
     cascade: true

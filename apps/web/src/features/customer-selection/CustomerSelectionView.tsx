@@ -81,10 +81,17 @@ export function CustomerSelectionView({ onOrderCreated, selectedRequest }: Custo
                     <div className="text-left md:text-right">
                       <p className="text-xl font-semibold">{offer.totalAmountUzs.toLocaleString("uz-UZ")} UZS</p>
                       <p className="mt-1 text-xs text-smeta-mauve">
-                        {offer.validityHours} soat · {offer.deliveryIncluded ? "Yetkazish narx ichida" : "Yetkazish alohida"}
+                        {offer.validityHours} soat - {offer.deliveryEstimate || "Yetkazish muddati kiritilmagan"}
                       </p>
                     </div>
                   </div>
+
+                  <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                    <Info label="Material subtotal" value={`${offer.materialSubtotalUzs.toLocaleString("uz-UZ")} UZS`} />
+                    <Info label="Yetkazish" value={`${offer.deliveryFeeUzs.toLocaleString("uz-UZ")} UZS`} />
+                    <Info label="Ro'yxat" value={offer.completeListAvailable ? "To'liq qamrab olingan" : "To'liq emas"} />
+                  </div>
+
                   <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                     <StatusPill label={offer.status} />
                     <button
@@ -109,8 +116,13 @@ export function CustomerSelectionView({ onOrderCreated, selectedRequest }: Custo
           <div className="mt-5 space-y-3">
             <Info label="Buyurtma" value={order.publicCode} />
             <Info label="Do'kon" value={order.store.name} />
-            <Info label="Summa" value={`${order.acceptedAmountUzs.toLocaleString("uz-UZ")} UZS`} />
+            <Info label="Material subtotal" value={`${order.selectedOffer.materialSubtotalUzs.toLocaleString("uz-UZ")} UZS`} />
+            <Info label="Yetkazish" value={`${order.selectedOffer.deliveryFeeUzs.toLocaleString("uz-UZ")} UZS`} />
+            <Info label="Tanlangan summa" value={`${order.acceptedAmountUzs.toLocaleString("uz-UZ")} UZS`} />
+            <Info label="Final summa" value={`${order.finalAmountUzs.toLocaleString("uz-UZ")} UZS`} />
             <Info label="Holat" value={formatStatusLabel(order.status)} />
+            <Info label="Yetkazish proof" value={order.deliveryProofNote || order.deliveryProofFileName || "Hali yo'q"} />
+            <Info label="Tasdiqlangan vaqt" value={order.confirmedAt ? new Date(order.confirmedAt).toLocaleString("uz-UZ") : "Hali yo'q"} />
             <Info label="Izoh" value={order.statusNote || "Izoh yo'q"} />
           </div>
         ) : (

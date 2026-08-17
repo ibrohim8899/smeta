@@ -35,7 +35,7 @@ export const USER_ROLES = [
 
 export type UserRole = (typeof USER_ROLES)[number];
 
-export const ACCOUNT_STATUSES = ["pending", "active", "suspended", "blocked"] as const;
+export const ACCOUNT_STATUSES = ["pending", "active", "rejected", "suspended", "blocked", "archived"] as const;
 
 export type AccountStatus = (typeof ACCOUNT_STATUSES)[number];
 
@@ -60,11 +60,13 @@ export const PERMISSIONS = [
   "offers.select",
   "orders.read",
   "orders.fulfill",
+  "orders.confirm",
   "dealers.apply",
   "dealers.read",
   "dealers.moderate",
   "finance.read",
   "finance.record_payment",
+  "reports.read",
   "audit.read",
   "notifications.read",
   "notifications.manage",
@@ -84,13 +86,14 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "orders.read",
     "dealers.read",
     "dealers.moderate",
+    "reports.read",
     "audit.read",
     "notifications.read",
     "notifications.manage"
   ],
-  customer: ["requests.create", "requests.read", "offers.read", "offers.select", "orders.read"],
+  customer: ["requests.create", "requests.read", "offers.read", "offers.select", "orders.read", "orders.confirm"],
   dealer: ["requests.create", "requests.read", "dealers.apply", "orders.read"],
-  finance: ["orders.read", "finance.read", "finance.record_payment", "audit.read", "notifications.read"],
+  finance: ["orders.read", "finance.read", "finance.record_payment", "reports.read", "audit.read", "notifications.read"],
   store: ["requests.read", "stores.read", "offers.create", "offers.read", "orders.read", "orders.fulfill"],
   superadmin: [...PERMISSIONS]
 };

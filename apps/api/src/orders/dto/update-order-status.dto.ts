@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString, MaxLength } from "class-validator";
+import { IsIn, IsInt, IsOptional, IsString, MaxLength, Min } from "class-validator";
 
 export class UpdateOrderStatusDto {
   @IsIn([
@@ -18,4 +18,19 @@ export class UpdateOrderStatusDto {
   @IsString()
   @MaxLength(500)
   note?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  proofNote?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(180)
+  proofFileName?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  finalAmountUzs?: number;
 }

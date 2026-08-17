@@ -1,0 +1,1085 @@
+PRODUCT AND ENGINEERING SPECIFICATION
+SMETA MARKET
+V1 TECHNICAL SPECIFICATION (TZ)
+Telegram-first procurement and commission-control platform for customers, builders/dealers and construction-material stores.
+V1 PRODUCT PRINCIPLE. The customer flow must be easier than calling several stores. Registration is optional for customers, Telegram is the controlled-role identity channel, and every primary screen is designed mobile-first for older and non-technical users.
+Source baseline: the approved V1 discussion and the SMETA MARKET investor-deck core flow - one material list, several confidential store offers and one customer decision.
+Document Map
+REVIEW ORDER. Product/operations/finance should first approve Sections 0, 3, 4.6, 4.7 and 14. Engineering should then baseline Sections 5-12 and map each requirement ID to implementation tasks and tests.
+0 V1 Review Snapshot
+This section contains the implementation baseline that should be reviewed first. The detailed requirements are built around these decisions.
+CONFIGURABLE, NOT HARDCODED. Exact percentages, timeouts, debt due days, file limits and payout schedule are configuration values. Safe defaults are included where the business has not fixed a number.
+0.1 Core business formulas
+Commission base = verified final material subtotal (delivery excluded by default)
+Platform gross commission = commission base x store commission rate
+Dealer reward = commission base x dealer reward rate
+Platform net = platform gross commission - dealer reward
+The system shall validate that the active dealer reward does not exceed the store commission for the order, unless a super administrator explicitly approves a subsidized exception.
+0.2 V1 exclusions that prevent scope inflation
+No native Android or iOS application.
+No product catalog, SKU stock management or store price list.
+No AI/OCR requirement for reading the uploaded receipt/smeta; administrators and stores work from the original file.
+No item-level combination of several stores; one request produces one selected store.
+No online customer payment, escrow or payment gateway.
+No logistics marketplace or driver tracking integration.
+No public/government analytics dashboard, demand forecasting or market intelligence module.
+No ratings, reviews, in-app chat, premium subscriptions or corporate procurement module.
+1 Product Overview and Scope
+The purpose of V1 is to prove a simple, mutually beneficial marketplace loop while preserving a codebase that can grow without a rewrite.
+1.1 Business objective
+SMETA MARKET converts one real customer material list into several written, confidential and comparable offers from verified construction-material stores. A builder/dealer brings the customer and earns a transparent reward from completed sales. The store gains new orders and owes a configurable commission to the platform. The platform controls attribution, offer selection, order evidence, store debt and dealer payouts.
+1.2 Primary success condition
+END-TO-END SUCCESS. A dealer shares a referral link; a customer sends a material-list photo without registration; several stores submit full-list totals; the customer selects one offer; the store delivers and uploads proof; the system posts store debt and dealer earning correctly; administrators can reconcile and record payment/payout.
+1.3 V1 actors
+1.4 Business invariants
+One submitted request has zero or one dealer attribution, never several.
+One store has at most one active offer per request.
+One V1 request can produce only one selected/completed store order.
+Stores cannot see competitor offers; dealers cannot see confidential offer prices.
+Customer payment remains outside the platform in V1.
+Commission and reward are based on the verified final sale amount, not an unverified estimate.
+Posted finance records are corrected by compensating entries, not deletion.
+Customer contact/address is released only to the accepted store.
+1.5 Pilot context
+The source concept proposes a 90-day Namangan pilot with approximately 20-30 stores and 5-6 material categories, measuring active stores, offers, order volume, savings, repeat customers and fiscal-receipt coverage. These are business KPIs, not substitutes for software acceptance testing.
+2 Roles, Permissions and Data Visibility
+Permissions are enforced on the backend. Frontend visibility is a usability layer and never the security boundary.
+2.1 Administrator permission groups
+3 End-to-End Business Workflows
+These workflows define the intended user journey and the transaction points that the implementation must protect.
+3.1 Dealer referral and customer request
+Administrator approves dealer and the system creates a referral code/link/QR.
+Dealer shares the link or opens an assisted request for the customer.
+Customer opens the page and immediately photographs/uploads the material list.
+Customer supplies only minimal region/delivery details and submits.
+System snapshots dealer attribution and creates a secure customer link.
+Operations reviews the file, tags categories and publishes to matched stores.
+3.2 Store offer collection
+Matched stores receive a Telegram notification and open the request.
+Each store reviews the same material list but cannot see competitors.
+The store confirms full-list availability and submits material subtotal, delivery fee and delivery time.
+The backend calculates final total and exposes the offer only to the customer and administrators.
+Stores may revise or withdraw until the customer selects an offer.
+3.3 Customer decision and fulfilment
+Customer compares simple cards ordered by final total.
+Customer selects one store and confirms phone/address.
+Store accepts within the configured timeout; otherwise the customer chooses again.
+Accepted store updates preparation, dispatch and delivery statuses.
+Store uploads receipt/invoice and final sale amount; customer confirms delivery or reports a problem.
+3.4 Commission, debt and payout
+After verified completion, the backend calculates commission from the snapshotted rates and final material subtotal.
+Store ledger receives platform commission debt; dealer ledger receives approved earning.
+Finance records store payment and allocates it to debt.
+Dealer earning becomes payable after collection by default.
+Finance records payout; the dealer sees paid status and proof/reference.
+3.5 Failure and exception flows
+4 Detailed Functional Requirements
+Each requirement has a stable ID for implementation, testing and change control. “Shall” statements are mandatory for V1 unless explicitly moved to out-of-scope.
+4.1 Authentication, identity and authorization
+AUTH-001 - Telegram Mini App authentication for controlled roles. Dealer, store and administrator access shall begin from the official Telegram bot. When the Mini App opens, the frontend shall send Telegram initialization data to the backend, and the backend shall verify it before creating a platform session. No controlled-role screen may trust Telegram data only on the client.
+AUTH-002 - Server-side Telegram data validation. The backend shall validate the Telegram signature, bot identity, authentication age and required fields. Invalid, expired, replayed or malformed initialization data shall be rejected with a stable error code and a clear user-facing message.
+AUTH-003 - Bot-based login for the normal website. When a dealer, store or administrator opens the responsive website outside Telegram, the login page shall create a short-lived login session and display an “Open Telegram” button and QR code. The user shall confirm the session through the bot; the browser shall then receive an authenticated session without a password.
+AUTH-004 - One-time login nonce protection. Each browser login session shall use a cryptographically random, single-use nonce with an expiration time. A nonce may be bound to only one Telegram account and shall become invalid immediately after successful use, cancellation or expiration.
+AUTH-005 - Role-based access after approval. Authentication identifies the Telegram user; authorization depends on the user’s approved platform roles. Pending, rejected, suspended and blocked profiles shall receive only the screens and actions allowed for their current status.
+AUTH-006 - Customer access without mandatory registration. A customer shall be able to create and manage a request as a guest without creating a password, completing a profile or learning a login process. Guest access shall use a secure request link/token and shall expose only that customer’s request data.
+AUTH-007 - Optional Telegram attachment for customers. A guest customer may choose “Save in Telegram” or open the flow inside the bot. The system shall then attach the request to the verified Telegram identity so the customer can receive notifications and see request history, without forcing profile completion.
+AUTH-008 - Session lifecycle. Authenticated sessions shall use a short-lived access credential and a rotatable refresh/session credential. Expiration, refresh, revocation and logout behavior shall be centralized in the authentication module and shall work consistently in Telegram WebView and standard browsers.
+AUTH-009 - Logout and session revocation. A user shall be able to log out from the current device. Administrators shall be able to revoke all sessions of a compromised or suspended account. Revoked sessions shall lose access immediately or at the next API request.
+AUTH-010 - No password authentication in V1. V1 shall not store or process user passwords. Dealer, store and administrator identity shall rely on Telegram verification; customers shall use Telegram identity or guest access tokens.
+AUTH-011 - Initial super-administrator bootstrap. The first super administrator shall be created from a protected deployment configuration containing an approved Telegram user ID. After bootstrap, additional administrators shall be added only by an authorized super administrator.
+AUTH-012 - Multiple approved roles per Telegram account. The data model shall allow one Telegram account to hold more than one approved role, for example dealer and store representative. The UI shall provide a clear role switcher and shall never combine permissions implicitly.
+AUTH-013 - Profile completion by role. After first verified access, dealer and store users shall complete the role-specific required fields before performing business actions. The system shall save progress and show exactly which fields or documents are missing.
+AUTH-014 - Account status enforcement. Active, pending, rejected, suspended, blocked and archived statuses shall be supported. Every protected API operation shall re-check effective role and account status; hiding a button on the frontend alone is not sufficient.
+AUTH-015 - Login and security audit. Successful logins, failed validation attempts, role switches, session revocations and administrator override actions shall be recorded with user, timestamp, source, device metadata where available and correlation ID.
+AUTH-016 - Guest access token security. Guest tokens shall be high-entropy random values. Only a hash of the token shall be stored in the database; links shall be revocable and rotatable, and expired or revoked tokens shall not expose whether a request exists.
+AUTH-017 - Secure account linking. When a guest request is attached to Telegram, the backend shall require control of both the guest token and the verified Telegram session. The same request shall not be attachable to a second customer without an administrator-reviewed transfer.
+AUTH-018 - Authorization policy centralization. Role and permission rules shall be implemented through reusable NestJS guards/policies rather than duplicated controller checks. Financial actions shall require explicit finance permissions in addition to general administrator access.
+4.2 Customer and guest experience
+CUS-001 - Dealer referral landing. A dealer link or QR code shall open a minimal customer landing page showing the dealer name, the platform purpose and one dominant action: “Send material list”. The referral shall be captured before the customer starts the request.
+CUS-002 - No-registration primary flow. The customer shall be able to reach the upload step directly from the referral landing page. The system shall not require a password, account form, email address or long introduction before the material list can be sent.
+CUS-003 - Create request from camera or files. The customer shall be able to take a photo with the phone camera or select existing JPEG, PNG, PDF, XLS or XLSX files. At least one attachment shall be required unless a dealer creates the request on the customer’s behalf with an attachment.
+CUS-004 - Multiple attachment support. One request shall support multiple pages/files. The customer shall see thumbnails or file names, be able to remove an incorrect file and add another file before submission.
+CUS-005 - Mobile image optimization. The web app shall compress oversized photos before upload while preserving readable text. The customer shall see upload progress, retry failed files individually and never lose successfully uploaded files because another file failed.
+CUS-006 - Simple request details. The customer form shall request only information needed to obtain a useful offer: service region, delivery requirement, optional delivery area/address note, optional desired date and optional comment. Category tagging shall not be mandatory for the customer.
+CUS-007 - Contact information deferred until needed. Phone number shall be optional during initial upload. Before confirming a winning store, the customer shall provide either a valid phone number or an approved alternative contact method so the selected store can fulfil the order.
+CUS-008 - Clear consent and privacy notice. Before submission, the customer shall see a short plain-language notice explaining that the uploaded list will be shared only with matched verified stores, while contact/address details remain hidden until an offer is selected.
+CUS-009 - Request submission confirmation. After submission, the customer shall receive a human-readable request number, current status and secure “Open request” link. Repeated taps or network retries shall not create duplicate requests.
+CUS-010 - Guest request access. A guest customer shall open the secure link and see only the relevant request, attachments, offer progress, selected order and status history. Sensitive internal data, commissions and other users’ information shall never be returned.
+CUS-011 - Customer request status. The customer shall see simple statuses such as “Received”, “Sent to stores”, “Offers arriving”, “Choose a store”, “Store preparing”, “On the way” and “Completed”. Technical/internal statuses shall be translated into plain language.
+CUS-012 - Offer availability notification. When the first offer arrives and when the configured collection period ends, an authenticated customer shall receive a Telegram notification. For a guest customer, the dealer shall be notified and the secure page shall show the updated offer count.
+CUS-013 - Offer comparison screen. Each offer card shall show verified store name, material subtotal, delivery fee, final payable total, complete-list availability confirmation, delivery time, validity period and store note. The grand total shall be the main visual value.
+CUS-014 - Default comparison order. Offers shall be sorted by final payable total by default. The customer may switch to fastest delivery, but V1 shall avoid complex filters or a dense marketplace layout.
+CUS-015 - Confidential competing offers. The customer shall see all valid offers for the request. Stores shall not see competing prices or the identity of other responding stores, and dealers shall not see confidential offer details.
+CUS-016 - Select exactly one store. V1 shall allow the customer to choose one offer for the entire material list. Split orders, item-level mixing and selecting several stores from one request are explicitly excluded.
+CUS-017 - Selection confirmation. Before final selection, the customer shall see the selected store, material subtotal, delivery fee, grand total and delivery estimate in a designed confirmation sheet. The customer shall confirm contact and delivery details at this step.
+CUS-018 - Atomic offer selection. The backend shall accept only one winning offer. Concurrent taps or requests shall return the already selected offer and shall never create multiple active orders.
+CUS-019 - Store acceptance fallback. After the customer chooses an offer, the store shall accept within the configured time. If the store declines or times out, the customer shall be informed and may choose another still-valid offer without creating a new request.
+CUS-020 - Order tracking. After store acceptance, the customer shall see order stages and the latest status update. The selected store’s allowed contact information shall become visible only after acceptance.
+CUS-021 - Cancel before fulfilment. The customer may request cancellation before the store marks the order as dispatched. Cancellation after preparation starts may require administrator review; the UI shall explain the current cancellation rule.
+CUS-022 - Delivery confirmation. When the store marks an order delivered, the customer shall be able to confirm receipt or report a problem through the secure request page or Telegram notification. Failure to respond shall not automatically erase the need for proof.
+CUS-023 - Report a problem. The customer may open a dispute with a short reason and optional attachment. A disputed order shall be frozen from final commission settlement until an administrator resolves it.
+CUS-024 - Request history for Telegram customers. Customers who attach Telegram shall see their active and completed requests in a simple history list. Guest customers are not required to create a permanent account and use the individual secure link.
+CUS-025 - Draft preservation. Unsubmitted request data and uploaded file references shall be preserved during accidental refresh, back navigation or temporary connection loss where technically possible. Expired drafts may be cleaned after a configurable retention period.
+CUS-026 - Readable error recovery. Validation and network errors shall use plain Uzbek text, highlight the exact step to fix and provide one clear retry action. Raw server messages, stack traces and numeric-only error codes shall not be shown to customers.
+CUS-027 - Customer privacy after completion. Completed requests shall remain available only to the customer’s secure access or verified Telegram profile. Public referral links shall never expose customer order details.
+CUS-028 - Assisted customer flow. A dealer may create and upload a request on behalf of an older customer. The system shall still capture customer contact/consent and generate a customer access link so the customer can review offers or the dealer can assist without taking ownership of the purchase decision.
+4.3 Dealer / builder experience
+DLR-001 - Dealer application. A builder/dealer shall start from the Telegram bot and submit name, phone, region, optional company/brigade name and required verification information. The profile shall remain pending until administrator approval.
+DLR-002 - Dealer approval status. The dealer shall see pending, approved, rejected or suspended status and any administrator note. Only approved dealers may generate active referral links and earn commission.
+DLR-003 - Unique referral identity. Each approved dealer shall receive a unique, non-guessable referral code used in web links, Telegram deep links and QR codes. Old codes shall be revocable without deleting historical attribution.
+DLR-004 - Shareable referral tools. The dealer dashboard shall provide copy link, open Telegram share and downloadable/displayable QR options. The share message shall be short and editable only within administrator-approved text.
+DLR-005 - Referral capture and snapshot. When a request is created from a dealer link, the dealer ID shall be stored on the request. The order shall later use this snapshot for commission; changing the dealer profile or default rate shall not rewrite historical orders.
+DLR-006 - One dealer per request. A material request may be attributed to only one dealer. A later referral link shall not overwrite an already submitted request. Administrators may correct attribution only before the first offer, with a required reason and audit entry.
+DLR-007 - Referral persistence before submission. A signed referral marker may be retained on the customer device for a configurable period so the customer can return and submit later. The final attribution shall be fixed at request submission.
+DLR-008 - Create request on behalf of customer. The dealer shall be able to create the same minimal request flow for a customer, upload the material list, enter customer contact with consent and send the secure review link to the customer.
+DLR-009 - Referred request list. The dealer shall see requests attributed to them with request number, customer display name or masked contact, date, region and business status. Offer amounts and competing store details shall remain hidden.
+DLR-010 - Dealer request status visibility. The dealer shall see operational stages needed to assist the customer: submitted, offers available, store selected, order accepted, completed, canceled or disputed. Internal moderation and financial notes shall not be visible.
+DLR-011 - No control over customer choice. The dealer shall not be able to select a store, edit submitted offers or modify the customer’s final order. An assisted selection may occur only while the customer is present and using the customer access flow.
+DLR-012 - Commission overview. The dealer dashboard shall show total estimated, approved, payable and paid earnings. Each amount shall include a short explanation so the dealer understands why money may still be pending.
+DLR-013 - Commission transaction history. The dealer shall see one ledger row per earning, adjustment, reversal and payout, including order reference, calculation base, rate snapshot, amount, status and date.
+DLR-014 - Payout details. The dealer shall maintain the payout information required by the business, such as card/account details and recipient name. Changes shall be logged and may require administrator re-verification before the next payout.
+DLR-015 - Payout history and proof. The dealer shall see payout amount, date, method, status and administrator-provided reference or proof attachment. A payout shall never exceed the payable balance.
+DLR-016 - Dealer notifications. The bot shall notify the dealer when a referred request is submitted, an order is completed, commission becomes approved/payable, a payout is recorded or a dispute/reversal affects earnings.
+DLR-017 - Dealer performance summary. The dashboard shall show referred requests, selected orders, completed orders, conversion rate and total paid earnings for a selected period. These metrics are informational and shall not expose customer or store confidential data.
+DLR-018 - Suspension behavior. A suspended dealer shall lose the ability to generate new attributable requests and receive new earnings, while historical records and legitimate payable balances remain visible and administratively manageable.
+DLR-019 - Suspicious self-referral review. Administrators shall be able to flag or reject suspicious self-referral patterns. The system shall record customer contact hashes and other non-invasive signals needed for manual review without automatically blocking legitimate family or repeated customers.
+DLR-020 - Dealer support notes. The dealer may send a support request related to attribution, order status or payout. Financial corrections shall be performed only by administrators through adjustment records, never by editing ledger history.
+4.4 Store experience
+STR-001 - Store application. A store representative shall apply through the Telegram bot and provide legal/display name, responsible person, phone, tax/registration identifier where required, address, service regions, material categories and verification documents.
+STR-002 - Store verification and approval. The administrator shall approve, reject or return the application for correction. Only approved and active stores may receive material requests or submit offers.
+STR-003 - Store business profile. The store shall maintain logo/photo, display name, address, contact, service areas, supported categories, delivery capability and working note. Sensitive legal documents shall be visible only to authorized administrators.
+STR-004 - Request inbox. The store shall receive only requests assigned to it by matching or an administrator. The inbox shall show request number, region, received time, response deadline and status, optimized for mobile use.
+STR-005 - New request notification. The Telegram bot shall send a notification with an “Open request” button when a new request is assigned. Duplicate Telegram updates or retries shall not create duplicate inbox records.
+STR-006 - Request detail visibility. The store shall view the uploaded material list, customer region, delivery requirement, desired date and customer note. Customer phone and exact address shall remain hidden until the store wins and accepts the order.
+STR-007 - Confidentiality from competitors. A store shall never receive competing store names, prices, offer counts per competitor or customer comparison activity. It may see only its own offer status and whether the request is still open, selected, expired or canceled.
+STR-008 - Decline request. A store may decline with a simple reason such as unavailable items, outside service area, insufficient time or other. Declining shall close only that store’s opportunity and shall not affect other stores.
+STR-009 - Whole-list quote requirement. V1 offers shall cover the entire uploaded material list. The store shall explicitly confirm that it can supply the full request; item-level partial offers and mixed-store orders are out of scope.
+STR-010 - Offer fields. The store shall enter material subtotal, delivery fee, delivery estimate, offer validity preset and optional note. The final payable total shall be calculated by the backend and displayed before submission.
+STR-011 - Currency and amount validation. All V1 offer amounts shall use UZS as non-negative whole values. The backend shall reject invalid, negative, malformed or unreasonably large values according to configurable limits.
+STR-012 - Save offer draft. The store may save an incomplete draft and continue later while the request remains open. Drafts are private and are not visible to the customer.
+STR-013 - Submit offer. The store shall review a clear summary and submit the offer explicitly. Submission shall create an immutable timestamp and make the offer visible to the customer.
+STR-014 - One active offer per request. A store may have only one active offer for a request. A new revision shall update or version the existing offer instead of creating competing offers from the same store.
+STR-015 - Edit before selection. The store may revise price, delivery fee, timing or note while the request is open and no offer has been selected. The customer shall see the latest valid version and the system shall audit previous values.
+STR-016 - Withdraw offer. The store may withdraw an unselected offer with a reason. A selected or accepted offer cannot be withdrawn outside the cancellation/dispute process.
+STR-017 - Winning offer notification. When the customer selects the store, the bot shall show order summary and an accept/decline action. Customer contact details remain hidden until the store accepts.
+STR-018 - Store acceptance deadline. The selected store shall accept within a configurable timeout. If it declines or times out, the order candidate shall close and the request shall return to customer selection with remaining valid offers.
+STR-019 - Customer contact release. After acceptance, the store shall receive the confirmed phone and delivery details needed for fulfilment. Access shall be limited to the accepted order and logged.
+STR-020 - Order status updates. The store shall update the order through accepted, preparing, ready, dispatched and delivered. Only allowed transitions shall be available, and every change shall be timestamped.
+STR-021 - Final sale proof. Before completion, the store shall upload a fiscal receipt, invoice or other administrator-approved proof showing the actual material sale amount. The proof shall be stored securely and linked to the order.
+STR-022 - Actual sale amount. The store shall enter the final material subtotal and actual delivery fee. If the final material subtotal differs from the selected offer, the order shall require customer confirmation or administrator resolution before commission is finalized.
+STR-023 - Delivery completion. After delivery, the store shall mark delivered. The system shall request customer confirmation and keep the order in delivered-pending-confirmation until confirmation, administrator verification or dispute resolution.
+STR-024 - Store debt dashboard. The store shall see accrued platform commission, paid amount, outstanding amount, due date and status for each completed order, plus total current debt and overdue debt.
+STR-025 - Store payment history. The store shall see administrator-recorded payments and adjustments with date, amount, method, reference and proof. The store cannot edit or delete ledger entries.
+STR-026 - Commission transparency. For each completed order, the store shall see the commission base, its snapshotted store rate and resulting amount owed to the platform. Dealer reward and platform net margin shall remain private.
+STR-027 - Dispute submission. The store may dispute customer cancellation, final amount, delivery confirmation or financial calculation with a reason and supporting file. Disputed financial entries shall be frozen until resolution.
+STR-028 - Store suspension. A suspended store shall stop receiving new requests and submitting offers. Existing accepted orders shall be handled according to administrator decision; historical debts and payments remain intact.
+STR-029 - No product catalog in V1. The store shall not be required to create SKU-level products, stock quantities or price lists. Offers are manually entered against the customer’s uploaded full material list.
+STR-030 - Single primary store account in V1. Each store shall have one primary Telegram representative in V1. The database and authorization model shall allow future store members, but staff invitation and fine-grained store permissions are deferred.
+4.5 Request, offer and order engine
+CORE-001 - Unique business identifiers. Requests, offers, orders, payments and payouts shall receive human-readable reference numbers in addition to internal UUIDs. Reference generation shall be concurrency-safe and configurable by prefix/year.
+CORE-002 - Request draft state. A request shall begin as a draft while files and minimal details are collected. Drafts shall not be visible to stores and shall not generate commission attribution until submission.
+CORE-003 - Request submission idempotency. The create/submit operation shall support idempotency so a double tap, network retry or Telegram WebView reload does not create duplicate requests.
+CORE-004 - Manual moderation in V1. Every newly submitted request shall enter an operations review queue before store distribution. An administrator shall verify readability, region, category tags and obvious spam or duplication.
+CORE-005 - Request category tagging. Administrators may assign one or more material categories for matching. Customers are not required to understand or choose platform categories.
+CORE-006 - Store matching. The system shall propose stores that are active, approved, serve the request region and overlap the tagged categories. Administrators may add or remove recipients before publication.
+CORE-007 - Recipient snapshot. The set of stores receiving a request shall be stored. Later changes to a store’s service area or categories shall not rewrite historical recipient records.
+CORE-008 - Publish and response window. Publishing shall send the request to selected stores and start a configurable offer collection deadline. The customer and dealer shall see that offers are being collected.
+CORE-009 - Extend or republish. An administrator may extend the response deadline or add more stores if too few offers arrive. The action shall not invalidate already submitted offers unless their own validity expires.
+CORE-010 - Request expiry. A request with no selected offer shall expire after the configured period. An expired request may be reopened only by an administrator or duplicated by the customer into a new request.
+CORE-011 - Offer confidentiality boundary. Offer data shall be accessible only to the offer’s store, the request customer and authorized administrators. Dealer access is limited to business status and resulting commission records.
+CORE-012 - Offer validity. Each offer shall have a validity expiration. An expired offer shall not be selectable; the store may submit a revised valid offer while the request remains open.
+CORE-013 - Grand total calculation. The backend shall calculate grand total as material subtotal plus delivery fee. The frontend may preview the value, but the server-calculated amount is authoritative.
+CORE-014 - Selected offer lock. When an offer is selected, its commercial values and rate snapshots shall be locked for the candidate order. Subsequent store profile or commission setting changes shall not alter it.
+CORE-015 - Close non-winning offers. After store acceptance, remaining offers shall become not selected and the request shall stop accepting new offers. If the selected store fails before acceptance, remaining valid offers shall reopen for customer selection.
+CORE-016 - Order creation. Selecting an offer shall create one candidate order connected to the request, offer, customer, dealer attribution and store. The order becomes active only after store acceptance.
+CORE-017 - Allowed order transitions. The backend shall enforce a state machine. Users may not skip from accepted directly to completed without required proof and financial checks, except through an administrator override with reason.
+CORE-018 - Status history. Every request, offer and order status change shall record previous status, new status, actor, timestamp, source and optional reason. Status history shall be append-only.
+CORE-019 - Cancellation rules. Cancellation shall record initiating party and reason. Before store acceptance it closes without commission; after acceptance it may require operations review and may generate a financial adjustment only if a verified sale occurred.
+CORE-020 - Dispute freeze. A disputed order shall prevent automatic completion, store debt posting, dealer payable status and payout until an administrator resolves or partially resolves the dispute.
+CORE-021 - Completion prerequisites. An order may complete only when delivery is confirmed or administratively verified, final material subtotal is known, required proof exists and no unresolved dispute remains.
+CORE-022 - Final amount approval. If the final material subtotal equals the accepted offer, customer delivery confirmation is sufficient. If it differs, the customer shall approve the new amount or an administrator shall record a resolution with evidence.
+CORE-023 - No in-platform customer payment. V1 shall not collect customer payment or hold escrow. The customer pays the selected store outside the platform; the platform records only order evidence and commission obligations.
+CORE-024 - No split fulfilment. A request shall produce at most one completed order in V1. Item-level allocation, carts from multiple stores and partial invoices are deferred to later versions.
+CORE-025 - Audit of commercial edits. Price, delivery fee, final amount, commission rate, dealer attribution and financial status changes shall be auditable. Original values shall remain recoverable through version or audit records.
+CORE-026 - Optimistic concurrency. Updates to offer selection, order status and financial records shall use transaction and version checks so stale screens cannot overwrite newer decisions.
+CORE-027 - Time zone and currency. Business timestamps shall be stored in UTC and displayed in Asia/Tashkent. V1 currency is UZS; amounts are whole values and shall not use floating-point arithmetic.
+CORE-028 - Soft deletion and retention. Operational profiles and non-financial records may be archived/soft-deleted. Orders, commission entries, payments, payouts and audit history shall not be physically deleted through normal application functions.
+CORE-029 - Duplicate request support. A customer or administrator may duplicate an expired/canceled request, reusing attachments and basic details while creating a new reference, recipient set, deadline and financial context.
+CORE-030 - Service recovery. If notification delivery fails, the underlying request/offer/order state shall remain correct. Users shall always be able to open the web app and see the authoritative current state.
+4.6 Commission, store debt and dealer payout
+FIN-001 - Global and profile-specific rates. The platform shall support default store commission and dealer reward percentages plus optional store-specific and dealer-specific overrides. The effective rule priority shall be explicit and deterministic.
+FIN-002 - Rate effective dates. Commission rules shall have effective-from and optional effective-to dates. Updating a rule shall create a new version rather than silently modifying historical calculations.
+FIN-003 - Rate snapshot per order. At offer selection/order creation, the effective store commission rate and dealer reward rate shall be copied into an order commission snapshot. Later configuration changes shall not alter the snapshot.
+FIN-004 - Commission calculation base. The default base shall be the verified final material subtotal, excluding delivery fee. The base definition shall be configurable globally before launch but must be consistent and visible in all calculations.
+FIN-005 - Platform gross commission formula. Platform gross commission shall equal commission base multiplied by the store commission rate, calculated on the backend using precise decimal arithmetic and rounded to one UZS according to one documented rule.
+FIN-006 - Dealer reward formula. When a dealer is attributed, dealer reward shall equal commission base multiplied by the dealer reward rate. When no dealer is attributed, the reward is zero.
+FIN-007 - Platform net formula. Platform net before operational expenses shall equal platform gross commission minus dealer reward. The system shall block active rate combinations that would make dealer reward greater than platform gross commission unless a super administrator explicitly records a subsidized exception.
+FIN-008 - Estimated commission stage. When the customer selects an offer, the system may show an estimated dealer earning and expected store commission based on the selected offer. Estimated values are not ledger debt and may change with the verified final sale amount.
+FIN-009 - Commission finalization trigger. Commission shall be finalized only after order completion prerequisites are met: final amount verified, delivery confirmed/approved, proof present and dispute resolved. Selection alone shall not create payable money.
+FIN-010 - Store debt posting. Order completion shall post an immutable debit entry to the store ledger for platform gross commission. The entry shall include order, base, rate, amount, due date and calculation metadata.
+FIN-011 - Dealer earning posting. Order completion shall post an approved dealer earning entry. The earning shall be linked to the same order and rate snapshot and shall remain non-payable until the store commission collection condition is met.
+FIN-012 - Dealer payable condition. By default, a dealer earning becomes payable after the related store debt is fully paid. A finance administrator may release it earlier only with explicit permission, reason and audit record.
+FIN-013 - Manual store payment recording. V1 shall allow finance administrators to record cash, bank transfer or other approved payments received from a store. Each payment requires amount, date, method, reference and optional proof attachment.
+FIN-014 - Partial store payments. A payment may be allocated partially across one or more open store debt entries. The system shall maintain original debt, paid amount, remaining balance and allocation history.
+FIN-015 - No over-allocation. The system shall prevent allocating more than a payment amount or more than an open debt balance. Any excess shall be held as an unapplied store credit only if that feature is enabled by finance policy.
+FIN-016 - Store debt statuses. Debt entries shall support open, partially paid, paid, overdue, disputed, adjusted and void/reversed states. Status shall be derived from ledger facts where possible rather than manually typed.
+FIN-017 - Debt due date and aging. A configurable number of days after completion shall determine due date. Finance views shall group outstanding debt by current, 1-7 days overdue, 8-30 days overdue and more than 30 days overdue.
+FIN-018 - Financial adjustments. Corrections shall use positive or negative adjustment entries linked to the original transaction. Administrators shall not edit or delete posted debt, earning, payment or payout rows.
+FIN-019 - Cancellation/refund reversal. If a verified completed sale is later canceled, returned or reduced, finance shall post compensating entries to store debt and dealer earning based on the approved actual adjustment. Paid dealer amounts may create a negative future balance.
+FIN-020 - Disputed financial entries. A dispute shall freeze collection and payout status for the affected portion. Resolution shall record the approved base amount and generate any required adjustments.
+FIN-021 - Dealer payout creation. A finance administrator shall create a payout from the dealer’s payable balance, selecting amount, method, recipient details and payout date. The payout shall not exceed available payable balance.
+FIN-022 - Dealer payout statuses. Payouts shall support draft, approved, paid, failed, canceled and reversed. Marking paid shall require reference or proof; failure or reversal shall restore the appropriate payable balance through ledger entries.
+FIN-023 - Payout approval control. The architecture shall support maker/checker approval for payouts. V1 may allow one authorized finance administrator, but permission boundaries and status model shall not require redesign when dual approval is enabled.
+FIN-024 - Store financial statement. The store shall be able to view and export a statement showing opening balance, debts, payments, adjustments and closing balance for a date range.
+FIN-025 - Dealer financial statement. The dealer shall be able to view and export a statement showing approved earnings, payable transitions, payouts, reversals and closing balances for a date range.
+FIN-026 - Administrator finance dashboard. Finance administrators shall see total accrued commission, collected commission, outstanding debt, overdue debt, approved dealer earnings, payable earnings and paid payouts, with date and entity filters.
+FIN-027 - Reconciliation. The system shall provide a reconciliation report comparing completed-order commission snapshots with posted store debt and dealer earning entries. Missing or mismatched records shall be flagged.
+FIN-028 - Financial permissions. Only authorized finance roles may create payments, payouts, adjustments, waivers, early releases or reversals. Operations administrators may view limited status but cannot change money records.
+FIN-029 - Financial audit trail. Every finance action shall record actor, timestamp, before/after values, reason, source and linked proof. Financial audit records shall be immutable from the application.
+FIN-030 - Decimal-safe API representation. Money and percentage values shall be stored and calculated precisely. API responses shall use integer/decimal strings or another documented lossless representation, never JavaScript floating-point values that can introduce rounding errors.
+FIN-031 - Rate visibility boundaries. A store sees its own commission rate and debt; a dealer sees its own reward rate and earnings; the customer sees neither; only authorized administrators see the complete margin calculation.
+FIN-032 - Historical rate evidence. Each completed order shall retain the rule IDs and exact rates used, so a later audit can reproduce the calculation even after configuration changes.
+FIN-033 - Minimum data before settlement. No debt or earning shall post without store, customer/request, selected offer, verified final amount, completion timestamp and rate snapshot. The transaction shall fail atomically if any required record is missing.
+FIN-034 - Finance exports. Authorized administrators shall export filtered debt, payment, earning and payout tables to CSV/XLSX with stable column names and displayed totals. Export actions shall be audited.
+FIN-035 - Manual waiver policy. A super administrator may waive part or all of a store debt only by posting a waiver adjustment with reason and proof/approval reference. Waiver shall not silently increase dealer payable balance unless separately approved.
+FIN-036 - Financial data retention. Financial ledgers, proofs and audit data shall be retained according to the organization’s legal/accounting policy. The implementation shall make retention duration configurable and shall never purge active or disputed records automatically.
+4.7 Administration
+ADM-001 - Administrator role model. V1 shall support at least Super Administrator, Operations and Finance permission groups. One person may hold several groups, but each action shall check the required permission.
+ADM-002 - Mobile-capable admin access. The administration interface shall be responsive and usable on a phone, while dense reports and tables may provide enhanced desktop layouts. Core approvals and status actions must not require a desktop.
+ADM-003 - Application queues. Administrators shall see separate pending dealer and store applications with submitted data, documents, age of application and approve/reject/request-correction actions.
+ADM-004 - Approval notes. Rejection, suspension and request-for-correction actions shall require a reason. The applicant shall receive a plain-language Telegram notification and see the note in the web app.
+ADM-005 - User and role management. Super administrators shall search users, view Telegram identity, assign or revoke approved roles, suspend access and revoke sessions. Every change shall be audited.
+ADM-006 - Store management. Administrators shall edit verified store business metadata, service areas, categories, status and commission override. Legal/financial fields shall be permission-restricted.
+ADM-007 - Dealer management. Administrators shall edit dealer profile, status, referral code state, reward override and payout verification. Historical attribution and earnings shall remain unchanged.
+ADM-008 - Region directory. Administrators shall maintain active regions/districts used by customer forms and store service areas. Deactivating a region shall not break historical requests.
+ADM-009 - Category directory. Administrators shall maintain the simple V1 material category list and map stores to categories. Categories are used for matching, not as a customer-facing product catalog.
+ADM-010 - Request moderation queue. Operations administrators shall review new requests, preview all attachments, correct region/category metadata, reject spam/duplicates or publish to matched stores.
+ADM-011 - Store recipient management. Before or after publication, operations may add eligible stores, remove non-responding recipients and resend notifications. The system shall keep a complete recipient history.
+ADM-012 - Request deadline controls. Operations may extend offer collection, expire a request, reopen an expired request or duplicate it. Changes require a reason when they affect already submitted offers.
+ADM-013 - Offer oversight. Authorized administrators shall view all offers for support and dispute resolution. Offer edits remain the store’s responsibility; an administrator may invalidate an offer only with a reason.
+ADM-014 - Assisted customer selection. An administrator may select an offer only when the customer has explicitly authorized assistance and the authorization is recorded. The action shall be clearly marked as administrator-assisted.
+ADM-015 - Order operations board. Administrators shall view orders by status, store, dealer, date and overdue action. The board shall highlight store acceptance timeout, stalled preparation, pending delivery confirmation and disputes.
+ADM-016 - Order status override. Authorized operations administrators may correct an invalid status transition only through an override action requiring reason and optional evidence. Overrides shall not bypass finance prerequisites silently.
+ADM-017 - Final amount review. Administrators shall compare selected offer, store-entered final amount, receipt proof and customer response. They may approve, reject or correct the final base through a documented resolution.
+ADM-018 - Dispute management. Administrators shall open, assign, comment on, resolve or close disputes. Resolution shall define order outcome and any financial adjustments.
+ADM-019 - Commission configuration. Finance/super administrators shall manage default and profile-specific commission rules, effective dates and validation. The UI shall show projected platform net before activating a rate combination.
+ADM-020 - Store debt management. Finance administrators shall view debt aging, record payments, allocate payments, post adjustments/waivers and export statements.
+ADM-021 - Dealer earnings management. Finance administrators shall view estimated/approved/payable earnings, release approved earnings when allowed, create payouts and post reversals/adjustments.
+ADM-022 - Finance proof handling. Payments, payouts, waivers, adjustments and manual completion may include attachments. Proof files shall use the same secure storage and access controls as request files.
+ADM-023 - Operational dashboard. The dashboard shall show submitted requests, published requests, offers received, orders selected, orders completed, no-offer cases and average response time for a selected period.
+ADM-024 - Business dashboard. Authorized users shall see gross merchandise value, accrued/collected platform commission, outstanding store debt, dealer earnings and payouts. Values shall be clearly labeled as order value versus platform revenue.
+ADM-025 - Search and filtering. Admin lists shall support server-side search, date range, status, region, store, dealer and reference filters. Filters shall be reflected in the URL so a view can be bookmarked or shared between authorized admins.
+ADM-026 - Export. Filtered operational and finance lists shall export to CSV/XLSX. Export generation shall enforce the same permissions and filters as the screen.
+ADM-027 - Notification templates. Administrators shall manage approved plain-text Telegram notification templates or template variables without changing code. Critical security and financial templates may be restricted to super administrators.
+ADM-028 - System settings. Super administrators shall manage configurable values such as request deadline, store acceptance timeout, referral lifetime, debt due days, file limits and notification retry limits.
+ADM-029 - Audit log viewer. Authorized administrators shall search audit entries by actor, entity, action, date and correlation ID. The viewer shall show before/after metadata while protecting secret tokens.
+ADM-030 - Support notes. Operations may add internal notes to requests, stores, dealers and disputes. Internal notes shall never be returned to customer/dealer/store APIs.
+ADM-031 - Data correction policy. Business data may be corrected through explicit actions and audit history. Financial records and completed order evidence shall not expose generic edit/delete buttons.
+ADM-032 - Suspension effects preview. Before suspending a store or dealer, the administrator shall see active orders, outstanding debt and payable earnings that may be affected and shall choose how active operations are handled.
+ADM-033 - No hard delete for business entities. Admin UI shall archive/deactivate rather than physically delete stores, dealers, requests or orders. Hard deletion shall be limited to non-production test data through controlled maintenance procedures.
+ADM-034 - Manual notification resend. Administrators shall be able to resend failed or missed operational notifications without duplicating the underlying business action.
+ADM-035 - Configuration audit. Every change to commission rules, timeouts, file limits, region/category dictionaries and notification templates shall record old value, new value, actor and effective time.
+ADM-036 - Admin session security. High-risk finance and role actions shall require a recent verified session and may request re-confirmation through Telegram or a designed confirmation dialog.
+ADM-037 - Operational assignment. The architecture shall support assigning requests/disputes to an administrator. V1 may use a simple assignee field, preparing for a larger operations team.
+ADM-038 - Pilot KPI view. The admin dashboard shall provide the pilot metrics inherited from the concept: active stores, number of offers, order volume, customer savings where calculable, repeat customers and fiscal-receipt coverage.
+ADM-039 - Health and integration status. Super administrators shall see whether API, database, object storage and Telegram webhook are healthy, plus the last successful notification processing time. Secret configuration values shall not be exposed.
+ADM-040 - Administrator help and action guidance. Complex finance and override screens shall include concise explanatory text, required prerequisites and consequences. The system shall prefer preventing invalid actions to showing errors after submission.
+4.8 Telegram, notifications, files and reporting
+TEL-001 - Official bot entry point. The Telegram bot shall be the primary entry point for dealer, store and administrator users and an optional convenience channel for customers.
+TEL-002 - Minimal bot conversation. The bot shall remain simple: start, role/status message, open-platform button, role-specific shortcuts and notifications. Business data entry shall occur in the Web App, not through long chat command flows.
+TEL-003 - Deep-link support. The bot shall support signed/declarative deep-link contexts for referral, browser login and opening a specific request/order. The backend shall validate context and never trust arbitrary IDs from the URL.
+TEL-004 - Webhook processing. Telegram updates shall be received through a protected webhook endpoint, verified, logged and processed idempotently. Long-running business tasks shall not block the webhook response.
+TEL-005 - Role-specific bot menu. Approved users shall see buttons relevant to their current role, including Open Platform, Requests, Orders, Earnings/Finance and Support as applicable.
+NOT-001 - Notification event model. Notifications shall be generated from business events rather than directly inside controller code. Each event shall specify recipient, template, variables, deep link, delivery status and retry count.
+NOT-002 - Reliable notification outbox. Business transactions that require notifications shall write an outbox record in the same database transaction. A background processor shall send Telegram messages and retry failures without duplicating business state.
+NOT-003 - Notification preferences. Users may mute non-critical informational notifications. Security, approval, winning offer, order status and finance notifications cannot be disabled when they are necessary to operate the platform.
+NOT-004 - Notification history. Authenticated users shall see recent notifications in the web app. Administrators shall see delivery status and failure reason for support.
+FILE-001 - Supported request file types. V1 shall accept JPEG/JPG, PNG, PDF, XLS and XLSX. Additional types shall be rejected with a clear message; file type shall be verified by content/MIME, not extension alone.
+FILE-002 - Configurable limits. Per-file size, file count and total request upload limits shall be configurable. The initial baseline is up to 10 files, 20 MB per file and 50 MB total per request unless changed before implementation.
+FILE-003 - Secure object storage. Production files shall be stored in S3-compatible object storage or an equivalent private object store. Local filesystem storage is allowed only for development/testing.
+FILE-004 - Private file access. Files shall not be publicly enumerable. The backend shall authorize access and issue short-lived signed URLs or stream the file to approved users.
+FILE-005 - File metadata. Each file record shall store original name, safe generated name/key, MIME type, size, checksum, uploader, entity link, upload status and timestamps.
+FILE-006 - Upload integrity. Incomplete or failed multipart uploads shall not appear as valid attachments. The backend shall verify size/checksum where supported and clean abandoned temporary objects.
+FILE-007 - Preview behavior. Images and PDFs shall have mobile-friendly preview; spreadsheets may be downloaded/opened using the device. Preview failure shall not prevent an authorized user from accessing the original file.
+FILE-008 - Malicious file protection. Uploads shall be isolated from executable paths, sanitized by safe naming, limited by MIME/size and prepared for antivirus scanning. Files shall never be executed by the application server.
+RPT-001 - Operational reports. V1 shall report requests by status, offers per request, response time, selected orders, completion rate, no-offer rate and cancellations/disputes.
+RPT-002 - Commercial reports. V1 shall report order value, average winning offer, estimated savings when a valid comparison exists, platform commission, store debt and dealer earnings.
+RPT-003 - Repeat customer metric. A repeat customer shall be calculated using verified Telegram identity or normalized/hashed contact according to privacy policy. Guest requests without a reliable identity shall not be falsely merged.
+RPT-004 - Fiscal receipt coverage. The system shall report the share of completed orders with approved fiscal receipt/invoice proof, aligned with the pilot measurement in the source concept.
+RPT-005 - No government analytics module in V1. V1 shall collect clean operational data but shall not include a separate government dashboard, demand forecasting, market-price intelligence or public analytics API. These remain future modules.
+5 UI/UX Specification
+The interface must prioritize the primary task, especially for older customers using inexpensive Android phones and mobile internet.
+5.1 Design system and interaction rules
+5.2 Customer screen map
+5.3 Dealer screen map
+5.4 Store screen map
+5.5 Administrator screen map
+5.6 Responsive behavior
+Mobile: single-column cards/forms, sticky CTA, bottom sheets and card-based replacements for short tables.
+Tablet: wider cards and two-column summaries where readability improves.
+Desktop: sidebar navigation, data tables, multi-column admin filters and no loss of mobile functionality.
+No critical action depends on hover, right-click, drag-only interaction or a pointer device.
+Safe-area padding is required inside Telegram/iOS webviews; the app must respect viewport changes when the keyboard opens.
+5.7 Customer-language and accessibility rules
+V1 customer copy is Uzbek Latin by default and uses everyday terms rather than marketplace or accounting jargon.
+“Receipt/smeta” in customer copy means the material list, while “fiscal receipt” is used only for the store’s final proof.
+Every field has a visible label; placeholder text is not the only label.
+Error text explains what happened and what to do next.
+Price formatting uses grouped UZS amounts and never displays long decimal values.
+Disabled actions explain the missing prerequisite instead of silently doing nothing.
+Status is communicated with text and icon, not color alone.
+The back button must preserve entered data and not accidentally cancel a request.
+6 Technical Architecture
+The recommended V1 architecture is a modular monolith: operationally simple for the pilot, but divided into explicit domains that can later become separate services.
+6.1 Technology baseline
+6.2 System context
+[Telegram Bot] —-> [React Web / Telegram Mini App] —-HTTPS—-> [NestJS API]
+[Mobile Browser] –> [React Web / Guest Customer Flow] –HTTPS—-> [NestJS API]
+[NestJS API] ——> [PostgreSQL]
+[NestJS API] ——> [Private Object Storage]
+[NestJS API/Worker] -> [Telegram Bot API]
+Customer: guest token or Telegram identity
+Dealer / Store / Admin: Telegram-verified session
+6.3 Backend module boundaries
+6.4 Backend code structure
+apps/api/src/ modules/ requests/ domain/ # entities, value objects and domain rules application/ # use cases, commands, queries and ports infrastructure/ # TypeORM repositories and external adapters interface/ # controllers, DTOs and presenters offers/ orders/ finance/ … common/ # errors, guards, logging and transaction helpers config/ # validated environment configuration
+Controllers shall remain thin. Business rules belong in application/domain services. TypeORM repositories and Telegram/object-storage clients are infrastructure adapters. Cross-module calls use explicit services/contracts, not arbitrary direct table access.
+6.5 Frontend architecture
+apps/web/src/ app/ # router, providers, Redux store and error boundary features/ customer-request/ dealer-referral/ store-offer/ order-tracking/ finance/ admin/ entities/ # request, offer, order, store and dealer view models shared/ api/ # RTK Query base API and typed endpoints ui/ # design system components forms/ # field wrappers and validation messages lib/ # formatting, Telegram adapter and permissions config/ # runtime config and feature flags
+RTK Query shall own server-state fetching, caching, invalidation and request status.
+React Hook Form shall own form state; components receive field APIs rather than duplicating validation state.
+Role routes and feature bundles shall be lazy-loaded so the customer upload flow stays light.
+API types shall be generated or checked against backend OpenAPI; frontend code shall not import TypeORM entities.
+Telegram-specific functions shall be behind an adapter so standard browser and future native-app flows remain possible.
+Feature folders shall own screens, hooks and role-specific components; the shared layer shall contain only truly reusable code.
+6.6 Database and consistency approach
+PostgreSQL UUID primary keys with separate human-readable public references.
+All entities include created_at and updated_at; status histories and finance ledgers are append-only.
+UZS amounts use NUMERIC(18,0) or equivalent lossless storage; rates use fixed-precision NUMERIC.
+Critical selection, completion and finance operations use database transactions and row/version locking.
+Indexes are required on status/date, Telegram ID, public reference, dealer code, store/region, request recipient and finance open-balance queries.
+TypeORM synchronize is disabled outside disposable local development; migrations are mandatory.
+TypeORM entities are persistence models, not API DTOs.
+Database constraints shall enforce uniqueness for one active store offer per request, one active winning order per request and idempotency keys.
+6.7 Notification outbox without mandatory Redis
+To keep V1 infrastructure small, reliable Telegram notifications shall use a PostgreSQL-backed outbox table processed by a NestJS background worker/scheduler. This preserves transactional reliability and leaves a clean adapter for replacing the worker with a dedicated queue system when scale requires it.
+6.8 API conventions
+6.9 Transaction boundaries
+The following operations shall be atomic database transactions:
+Customer selects an offer and candidate order is created.
+Selected store accepts and customer contact snapshot is released.
+Order completion finalizes commission snapshot, posts store debt and posts dealer earning.
+Store payment is created and allocated to debt entries.
+Dealer payout is created/approved/marked paid and corresponding ledger entry is posted.
+Financial reversal or adjustment posts all linked compensating entries.
+6.10 Repository and deployment structure
+A monorepo is recommended so backend, frontend and shared API contracts are versioned together, while production runtime components remain independently deployable.
+apps/ api/ # NestJS API worker/ # notification/deadline processor; may reuse API modules web/ # React responsive web and Telegram Mini App packages/ api-contracts/ # generated OpenAPI client/types or shared safe contracts ui/ # optional shared design-system source config/ # lint/TypeScript/build configuration infrastructure/ docker/ deployment/ scripts/
+7 Logical Data Model
+This is the minimum domain model for V1. Physical naming may follow the team’s SQL convention, but relationships and financial immutability must remain.
+7.1 Required relationships and constraints
+material_requests.dealer_id is nullable but, after submission, can be changed only through an audited pre-offer correction.
+A request owns many attachments, categories, recipient stores and offers.
+A store may have only one active offer for a request.
+A request may have only one active selected/candidate order in V1.
+An order keeps snapshots of store, dealer, customer contact, delivery information and commission rules required for historical evidence.
+Financial entries reference the originating order and use source-entry links for reversals/adjustments.
+Payment allocation is separate from payment so one payment can cover several debts and one debt can receive several payments.
+Guest access tokens are scoped to one request and are stored only as hashes.
+Audit records must not include raw guest tokens, refresh credentials, Telegram init data or full secret values.
+7.2 Status models
+7.3 Money and percentage fields
+Material subtotal, delivery fee, grand total, final subtotal, debt, payment, earning and payout use UZS whole-value precision.
+PostgreSQL storage shall use NUMERIC(18,0) or another exact type that cannot lose precision.
+Commission percentages use fixed precision, for example NUMERIC(7,4) where business rules permit fractional percentages.
+API values are returned as strings or another explicitly lossless contract.
+All calculation happens on the backend through one shared commission/calculation service.
+The rounding rule shall be identical in calculation, statement, export and UI display.
+7.4 Public references
+The system shall generate human-readable, non-secret references for support and business communication. Example formats are illustrative only:
+Request: REQ-2026-000123
+Offer: OFF-2026-000456
+Order: ORD-2026-000078
+Store payment: PAY-2026-000015
+Dealer payout: OUT-2026-000009
+Public references are not authorization tokens and shall never replace UUID/permission checks.
+8 API Surface
+Endpoint names may be refined during implementation, but the capabilities and authorization boundaries below are mandatory.
+8.1 Authentication and public/customer endpoints
+8.2 Dealer endpoints
+8.3 Store endpoints
+8.4 Administrator endpoints
+8.5 Telegram and internal endpoints
+8.6 Standard response and error behavior
+A successful API response should return the requested resource or operation result without an unnecessary wrapper unless pagination or metadata is needed. Errors shall follow one stable shape, for example:
+{ “code”: “OFFER_ALREADY_SELECTED”, “message”: “A store has already been selected for this request.”, “fieldErrors”: null, “correlationId”: “01J…” }
+400 for invalid input or business precondition failure that the user can correct.
+401 for absent/invalid authentication.
+403 for authenticated but unauthorized action.
+404 for inaccessible or non-existing resource where revealing existence is unsafe.
+409 for concurrency/idempotency conflict such as already-selected offer.
+422 may be used consistently for structured validation if the team selects that convention.
+429 for rate limiting.
+500 for unexpected server failure with no internal stack trace in the response.
+8.7 API versioning and compatibility
+V1 endpoints are under /api/v1.
+Breaking response/request changes require a new version or an agreed compatibility window.
+New optional fields may be added without breaking clients.
+Enum values used by client UX require backward-compatible handling and a default unknown state.
+Future native apps shall use the same domain API rather than duplicate business logic.
+9 Non-Functional Requirements
+Non-functional requirements are acceptance conditions, not optional engineering preferences. The implementation shall optimize for a Telegram-first, mobile-first pilot while preserving a maintainable path to future native applications and higher transaction volume.
+9.1 Usability, accessibility and compatibility
+NFR-001 - Mobile-first target. Every customer, dealer and store workflow shall be designed first for a 360-430 CSS-pixel viewport and touch interaction. No primary screen may require horizontal scrolling, hover, precise pointer movement or desktop-only controls.
+NFR-002 - Responsive desktop support. The same web application shall remain usable on tablets and desktop browsers. Wider screens may use additional space for navigation, tables and side details, but shall not change business behavior or require a separate desktop codebase.
+NFR-003 - One dominant action per step. Primary-flow screens shall present one visually dominant next action. Secondary navigation, analytics and account controls shall not compete with request upload, offer submission, offer selection, order confirmation or status update.
+NFR-004 - Older-user readability. Customer screens shall use plain Uzbek, large touch targets, readable type, clear labels and short instructions. Critical meaning shall not depend on icons, colour or technical terminology alone.
+NFR-005 - Designed interaction components. The frontend shall not use JavaScript alert(), confirm() or prompt(), nor rely on unstyled native select/date-picker UX for core flows. Confirmation dialogs, sheets, dropdowns, date inputs, toasts and errors shall use accessible, designed components with consistent behavior.
+NFR-006 - Accessibility target. Public and authenticated web interfaces shall target WCAG 2.2 AA for semantic structure, keyboard access, visible focus, contrast, form labels, error association, dialog focus management and reduced-motion support where applicable.
+NFR-007 - Low-bandwidth performance. The customer upload and offer-comparison flow shall remain practical on unstable mobile connections. The frontend shall use route/code splitting, lazy loading, compressed assets, sensible caching, retry-safe uploads and loading skeletons without hiding failures.
+NFR-008 - API response objective. Excluding file transfer, report generation and third-party Telegram latency, normal pilot-load API requests shall target a 95th-percentile server response time below 500 milliseconds. Slower endpoints shall be measured and optimized or documented.
+NFR-009 - Browser and WebView compatibility. V1 shall support current mainstream Android browsers, Telegram’s Android/iOS WebView, current iOS Safari and current desktop Chrome/Edge. Functional testing shall include at least one lower-spec and one mid-range Android device.
+NFR-010 - Localization readiness. Uzbek Latin shall be the V1 default language. User-visible text shall be stored in translation resources rather than hardcoded across components so Russian, Uzbek Cyrillic or other languages can be added without rewriting domain logic.
+9.2 Reliability, integrity and scalability
+NFR-011 - Availability objective. The pilot production service shall target 99.5% monthly availability, excluding planned maintenance announced in advance. Liveness, readiness and dependency health shall be observable independently.
+NFR-012 - Modular-monolith scalability. V1 shall be implemented as a modular monolith with clear domain ownership, dependency direction and internal contracts. Modules shall be separable later without introducing distributed-system complexity before the product requires it.
+NFR-013 - Transaction integrity. Offer selection, order creation, final-amount approval, commission posting, payment allocation, payout creation and reversals shall use database transactions and concurrency controls so partial or duplicate financial state cannot be committed.
+NFR-014 - Idempotent commands. Retried Telegram updates, upload completion calls, offer selection, status transitions, finance posting and webhook processing shall be idempotent. The system shall return the existing result or a stable conflict rather than duplicate records.
+NFR-015 - No silent failure. A failed upload, notification, deadline job, report, ledger post or external request shall create a visible failure state, retry record or operational alert. The UI shall not show success before the authoritative backend action succeeds.
+NFR-016 - Backup and recovery. Production PostgreSQL data and required file metadata shall be backed up automatically. The operator shall document retention, restore procedure and recovery testing; a restore test shall be completed before pilot launch.
+NFR-017 - Database migration discipline. All schema changes shall use reviewed TypeORM migrations. synchronize: true shall be prohibited outside disposable local development environments, and production deployment shall fail safely when required migrations cannot run.
+NFR-018 - Environment isolation. Local, test, staging and production environments shall use separate databases, credentials, storage namespaces, bot configuration and secrets. Production data shall not be copied into lower environments without approved anonymization.
+NFR-019 - Future mobile-client compatibility. Domain operations shall be exposed through a versioned API independent from Telegram WebApp UI assumptions. A future native application shall be able to reuse authentication exchange patterns and all business endpoints without duplicating backend logic.
+NFR-020 - Capacity baseline. The V1 design shall comfortably support the proposed Namangan pilot of approximately 20-30 stores and 5-6 categories and shall avoid design limits that prevent growth to at least thousands of users and requests. Final load targets shall be agreed before performance testing.
+9.3 Security, maintainability and observability
+NFR-021 - Security baseline. The application shall follow current OWASP web/API practices for authentication, authorization, input validation, upload handling, rate limiting, secret management, dependency patching and safe error responses.
+NFR-022 - Privacy minimization. The platform shall collect only data required for referral, procurement, fulfilment, support and financial control. Customer contact/address shall be masked until necessary, and administrator access shall be permission-based and auditable.
+NFR-023 - Auditability. Security-sensitive and business-critical mutations shall record actor, role, action, entity, before/after or structured change data, timestamp, request/correlation identifier and reason where required. Audit history shall be append-only for normal administrators.
+NFR-024 - Observability. The backend and workers shall emit structured logs, correlation IDs, metrics and error events sufficient to trace a request from Telegram/web entry through offer, order and finance processing. Sensitive values and guest tokens shall be redacted.
+NFR-025 - Stable error contract. API errors shall use documented codes and field-level validation details. User interfaces shall translate them into clear actions, while server logs retain the technical cause under the same correlation ID.
+NFR-026 - Rate limiting and abuse protection. Guest request creation, token checks, upload initiation, Telegram authentication, notification resend and other abuse-prone operations shall use configurable per-IP, per-token, per-user or per-chat limits without blocking normal older-user retries.
+NFR-027 - Maintainable TypeScript. Backend and frontend shall use strict TypeScript, linting, formatting, consistent naming and automated tests. Persistence entities shall not be returned directly as public API contracts; DTOs and mappers shall define boundaries.
+NFR-028 - API documentation. The backend shall publish an environment-appropriate OpenAPI specification covering request/response schemas, authentication, enums, pagination and documented error codes. Internal/worker endpoints shall be clearly separated and protected.
+NFR-029 - Configurable retention. Retention for guest links, temporary uploads, notification logs, generated exports and operational logs shall be configurable. Financial ledgers, audit events and legally required evidence shall not be removed by ordinary cleanup jobs.
+NFR-030 - Reproducible deployment. The repository shall include documented environment variables, build commands, migration procedure, health checks, rollback steps and operator runbooks so a new qualified engineer can deploy and diagnose the system without undocumented knowledge.
+10 Security and Privacy Controls
+Security controls must preserve the intentionally easy customer journey without weakening store, dealer, administrator or financial access. Guest simplicity is implemented through scoped capability links, not through public data exposure.
+10.1 Mandatory control matrix
+10.2 Data visibility rules
+A store sees only requests explicitly assigned to it and only its own offer.
+Before accepting an order, a store sees only the delivery area/detail needed to price the offer, not the customer’s full phone or exact address.
+A dealer sees attribution, request status, order status and own financial result, but not competitors, full material-list content by default, store commission rate or another dealer’s data.
+A guest link grants only the minimum actions for one customer request. It shall not expose administrative identifiers, internal notes or unrestricted file URLs.
+Operations administrators may inspect business records required for support; finance records require finance permission; super-admin access does not remove audit logging.
+Exported data shall apply the same filters and masking rules as the screen that initiated the export.
+10.3 High-risk abuse cases and required response
+10.4 Privacy and retention baseline
+The product owner shall approve a privacy notice before pilot launch. The notice shall explain what customer, Telegram, referral, order, evidence and finance data is collected; why it is used; who receives it; and how support/deletion requests are handled. V1 shall support administrative anonymization or restriction of non-financial profile data when deletion is lawful, while preserving required audit and settlement records.
+Suggested initial retention values are listed in Section 14 and remain configurable until legal and business review fixes them.
+11 Testing and Acceptance
+The application is accepted only when mandatory requirements are implemented, automated checks pass and the rendered user journeys work on target mobile devices. A screen existing without correct authorization, validation, ledger behavior or failure handling is not considered complete.
+11.1 Required test layers
+11.2 End-to-end acceptance scenarios
+AC-001 - Guest referral request. Opening a valid dealer referral link on a mobile browser shall let a customer upload a permitted material-list image, enter minimum contact/region data, submit without registration and receive a secure status link. The dealer attribution shall be stored exactly once.
+AC-002 - Optional Telegram attachment. A guest customer shall be able to attach the existing request to a verified Telegram identity without losing the request, changing dealer attribution or creating a duplicate.
+AC-003 - Store matching and confidentiality. After operations publishes a request to matching stores, only assigned active stores shall access it. One store shall never retrieve another store’s offer or the customer-only comparison payload.
+AC-004 - Complete store offer. A store shall submit material subtotal, delivery fee, availability and delivery time; the backend shall calculate final total and show the resulting offer to the owning customer while preserving the store’s own edit/withdraw rules.
+AC-005 - Single winning store under concurrency. If two selection commands arrive simultaneously, exactly one offer shall become selected, one candidate order shall be created and every retry shall return the same result or a documented conflict.
+AC-006 - Store acceptance timeout. A selected store that declines or fails to accept within the configured period shall not retain customer contact data or a live order. The customer shall be able to choose another still-valid offer.
+AC-007 - Fulfilment and proof. An accepted store shall perform only allowed status transitions, upload valid receipt/invoice evidence and submit the final material subtotal/delivery fee. Unauthorized transitions or invalid files shall be rejected clearly.
+AC-008 - Completion and commission posting. After the final amount is verified and delivery is confirmed/resolved, the order shall complete once and create exactly one store debt posting and, when attributed, one dealer earning posting from the snapshotted rates.
+AC-009 - Store payment allocation. Finance shall record a full or partial store payment, allocate it deterministically to eligible debts and see correct paid/remaining balances in both administrator and store statements without editing historical postings.
+AC-010 - Dealer payout. Only eligible payable earnings shall enter a payout. Approval/paid steps shall follow configured permissions, produce immutable ledger entries and update the dealer’s pending/payable/paid totals correctly.
+AC-011 - Dispute freeze and resolution. Opening a qualifying dispute shall freeze completion/settlement actions as defined. Resolution shall require an authorized administrator, reason and evidence and shall resume, cancel or reverse finance consistently.
+AC-012 - Suspension and session revocation. Suspending a dealer/store/admin account shall prevent new protected operations and revoke active sessions while preserving historical records and existing financial obligations.
+AC-013 - Older-user mobile usability. A representative customer shall complete request submission and offer selection on a small mobile viewport without horizontal scroll, hidden labels, browser-native alerts or mandatory account creation. All errors shall explain the next action.
+AC-014 - Retry safety. Repeating a Telegram webhook, upload completion, offer selection, completion job, finance posting or notification worker task shall not create duplicate users, files, orders, ledger entries or messages beyond configured retry behavior.
+AC-015 - Operations traceability. Given a request/order reference, an authorized administrator shall trace referral source, customer status, assigned stores, offers, selections, fulfilment evidence, final amount, commission debt, dealer earning, payments/payouts, notifications and audit events.
+11.3 Definition of done for each requirement
+A requirement is complete only when all applicable items below are satisfied:
+Backend authorization, validation and business rule are implemented.
+Database migration and constraints are included where data changes.
+Frontend state covers loading, empty, validation, success, offline/retry and server-error cases.
+Telegram notification/deep-link behavior is implemented where specified.
+Automated tests cover the normal path and at least one relevant failure/permission path.
+API/OpenAPI documentation and typed frontend integration are updated.
+Audit/metrics/logging are added for critical mutations.
+Mobile responsive and accessibility review passes.
+Product owner verifies wording and business behavior in staging.
+No unresolved critical/high-severity defects remain.
+11.4 Release acceptance gates
+All AUTH, CUS, DLR, STR, CORE, FIN, ADM, TEL, NOT, FILE, RPT, NFR and AC requirements marked for V1 are traceable to implementation and tests.
+Database migrations run from a clean database and from the previous staging version.
+Commission/reward examples reconcile to the smallest currency unit without floating-point error.
+Cross-role access tests prove that customer, dealer, store and administrator data boundaries hold.
+Backup restore and rollback procedures have been exercised.
+Production Telegram bot/webhook, domain, HTTPS, storage and monitoring are verified.
+Staging user acceptance is signed by product owner, operations and finance representatives.
+12 Deployment, Operations and Project Deliverables
+12.1 Runtime components
+12.2 Environments
+12.3 CI/CD expectations
+Every merge/deployment pipeline shall run, as applicable:
+Dependency installation from lockfile.
+Type checking, linting and formatting verification.
+Backend/frontend unit and integration tests.
+Production builds.
+Database migration validation against a clean and upgrade database.
+Security/dependency scan according to the team’s tooling.
+Container/image build where containers are used.
+Staging deployment and smoke tests.
+Controlled production deployment with health verification and rollback capability.
+Database migrations and application deployment order shall be backward-compatible for the deployment window. Destructive migrations require an explicit multi-step plan and backup confirmation.
+12.4 Operational monitoring and alerts
+The operator shall monitor at least:
+API/worker availability, request rate, error rate and latency.
+Database connection health, storage, long-running queries and backup success.
+Telegram webhook failures, duplicate/rejected updates and notification delivery backlog.
+Object-storage upload/download failures and cleanup jobs.
+Request/offer/order deadline jobs that are delayed or failed.
+Commission posting, allocation or payout jobs that fail reconciliation.
+Unusual login, rate-limit, denied-access or upload-abuse patterns.
+Critical alerts shall identify environment, service, timestamp and correlation/reference where available and shall not expose secrets or complete customer data.
+12.5 Backup, restore and rollback runbook
+Before production launch, the team shall document and test:
+Scheduled PostgreSQL backup frequency and retention.
+Object-storage durability/backup assumption and metadata consistency.
+Who may restore data and where restoration is tested.
+Target recovery point and recovery time approved for the pilot.
+Application rollback procedure when a release fails health or smoke checks.
+Forward-fix/restore procedure for a failed migration.
+Reconciliation steps after restoring financial/notification state.
+12.6 Required implementation deliverables
+12.7 Suggested repository quality gates
+Pull requests require review and passing CI.
+Domain/business changes include migration and test impact assessment.
+Direct production database edits are prohibited except an approved emergency procedure followed by an auditable migration/record.
+Secrets are rotated when staff access changes or exposure is suspected.
+Main branch remains deployable; releases are tagged and release notes list migrations/configuration changes.
+Finance-affecting changes require product/finance review and explicit regression tests.
+13 V2 Readiness and Explicit Future Extensions
+V1 shall leave clean extension points but shall not implement the following until separately approved. This prevents accidental scope growth while ensuring the architecture does not block future work.
+Any V2 feature that changes commission calculation, settlement responsibility, customer payment custody or legal data processing requires a new business/legal review and versioned specification.
+14 Configuration Baseline and Decisions to Confirm
+The following values shall be stored in typed configuration or versioned business-rule tables, not scattered as constants. Values marked business confirmation required must be approved before production launch; suggested defaults enable development and staging.
+14.1 Business and timing configuration
+14.2 File and technical configuration
+14.3 Suggested retention baseline
+14.4 Product decisions to sign off before production
+Exact default and exception commission/reward percentages.
+Whether commission includes delivery and discounts in every case.
+Store debt due date, payment method, reconciliation owner and consequences of overdue debt.
+Dealer payout frequency, minimum amount, approval chain and proof requirements.
+Exact event that allows automatic order completion versus mandatory customer/admin confirmation.
+Business-hour rules for offer and acceptance deadlines.
+Customer/dealer consent wording and whether dealer may see the material-list attachment while assisting.
+Required store/dealer verification documents and who legally approves them.
+Receipt/invoice evidence standard and handling of cash sales, partial fulfilment, refund and cancellation.
+Data/privacy notice, retention schedule and support contact.
+Production hosting, object-storage, monitoring and backup providers.
+Final Namangan pilot regions, categories, store list and support operating hours.
+15 Glossary, Traceability and Final V1 Boundary
+15.1 Glossary
+15.2 Requirement inventory
+15.3 Final V1 boundary statement
+V1 IS COMPLETE WHEN: a real dealer can bring a customer; the customer can submit a material list without mandatory registration; verified stores can privately compete with full-list totals; the customer can choose one store; fulfilment and evidence can be recorded; the platform can calculate and reconcile store commission and dealer reward; and every participant can see only the simple information needed for their role.
+The source presentation’s central mechanism - one material list, several supplier offers, comparison and one confirmed choice - remains the product foundation. This TZ deliberately narrows the first implementation to the user-approved customer/dealer/store commercial loop, Telegram-first identity, operational administration and auditable financial control. All excluded features require a separately approved change request or V2 specification.
+[[TABLE 1]]
+Core V1 flow || Result
+1. Dealer brings a customer || Referral is recorded
+2. Customer sends a material list || No mandatory registration
+3. Stores submit total offers || Offers stay confidential between stores
+4. Customer chooses one store || One request produces one winning store
+5. Store completes the sale || Store debt and dealer earning are controlled by the platform
+[[TABLE 2]]
+Document control || Value
+Document version || 1.0 Draft
+Document date || 05 August 2026
+Delivery scope || Backend API, responsive web application, Telegram bot and Telegram Mini App
+Backend stack || NestJS, TypeScript, TypeORM, PostgreSQL
+Frontend stack || React, TypeScript, Tailwind CSS, RTK Query, React Hook Form
+Primary channel || Telegram Mini App and mobile web
+Status || Prepared for product review and implementation planning
+[[TABLE 3]]
+Section || Purpose
+0 || Decisions that should be reviewed before implementation.
+1-3 || Product scope, actors, permissions and end-to-end workflows.
+4 || Every V1 functional requirement, identified for development and testing.
+5 || Mobile-first UI/UX rules and screen inventory.
+6-8 || Architecture, data model and API surface.
+9-10 || Non-functional, security and privacy requirements.
+11 || Testing, acceptance scenarios and release gates.
+12 || Deployment, operations and implementation deliverables.
+13-15 || V2 readiness, configurable decisions, glossary and traceability.
+[[TABLE 4]]
+Decision || V1 baseline
+Roles || Customer, dealer/builder, store and platform administrator.
+Customer access || Registration is optional. A customer can use a secure guest link or attach Telegram with one tap.
+Controlled-role access || Dealer, store and administrator authenticate through the Telegram bot / Telegram Mini App.
+Offer model || Each store submits one total offer for the full uploaded material list. The customer selects one store.
+Commercial settlement || The customer pays the store outside the platform. The store owes platform commission; the platform records dealer reward.
+Commission trigger || Commission is finalized after verified delivery and final sale amount, not at offer selection.
+Dealer payout trigger || Reward is approved after completed sale and becomes payable by default after the related store commission is collected.
+Store matching || V1 uses administrator-reviewed region/category matching. There is no product catalog or automatic inventory.
+Channels || Responsive website, Telegram bot and Telegram Mini App. Native mobile apps are V2.
+UX priority || Mobile-first, older-user-friendly, one primary action per screen, no raw browser alerts/selects/date pickers.
+Architecture || Modular monolith with clear boundaries, versioned REST API and future mobile-app compatibility.
+[[TABLE 5]]
+Actor || Responsibility
+Customer || House owner or buyer of construction/renovation materials. May use Telegram or remain a guest.
+Dealer / builder || Builder, brigade leader or trusted specialist who brings the customer through a referral and earns reward from completed sale.
+Store || Verified seller that receives matching requests, submits a total offer and fulfils the selected order.
+Administrator || Internal operations, finance and super-admin users who verify participants, manage requests and control financial ledgers.
+Telegram bot || Identity entry point, notification channel and launcher for the Web App.
+[[TABLE 6]]
+Capability || Customer || Dealer || Store || Administrator
+Open platform || Guest or Telegram || Telegram required || Telegram required || Telegram required
+Create own request || Yes || On behalf of customer || No || Assisted only
+View request attachments || Own request || Referred status only; attachments when assisting || Assigned requests || Authorized all
+Submit store offer || No || No || Yes || No; may invalidate
+View all offers || Own request || No || Own offer only || Authorized all
+Select winning offer || Yes || Only through customer flow || No || Assisted with authorization
+View customer phone/address || Own || Masked/consented || After acceptance only || Authorized all
+Update fulfilment status || Confirm/report || No || Yes || Override with reason
+View store commission || No || No || Own only || Finance authorized
+View dealer reward || No || Own only || No || Finance authorized
+Record store payment || No || No || View only || Finance only
+Create dealer payout || No || View own || No || Finance only
+Approve/suspend roles || No || No || No || Super/operations
+Manage system settings || No || No || No || Super admin
+View audit log || No || No || No || Permission-based
+[[TABLE 7]]
+Group || V1 responsibility
+Super Administrator || Full configuration, role assignment, suspension, finance exception and audit access.
+Operations || Applications, request moderation, store matching, orders, customer support and disputes; no unrestricted finance writes.
+Finance || Commission rules, store debt, payments, dealer earnings, payouts, adjustments and finance reports.
+[[TABLE 8]]
+Exception || Required behavior
+No store offers || Operations extends deadline, adds stores or customer duplicates request.
+Selected store declines/times out || Candidate order closes and valid offers reopen.
+Final amount changed || Customer approval or administrator resolution required.
+Customer/store disputes delivery || Order and financial settlement freeze until resolution.
+Store pays partially || Debt becomes partially paid; earning remains non-payable unless released by authorized override.
+Refund after completion || Compensating debt/earning entries are posted; historical rows are not deleted.
+[[TABLE 9]]
+Rule || Requirement
+Component system || Tailwind CSS design tokens with source-controlled accessible components based on Radix-style primitives / shadcn-style components. Components remain editable in the codebase.
+Browser defaults || Do not use alert(), confirm(), prompt(), raw default select or raw browser date picker as production UX. Use designed modal, bottom sheet, select/combobox, preset-date picker and toast components.
+Primary action || One dominant CTA per step, normally fixed/sticky near the bottom on mobile where it does not cover content.
+Tap targets || Buttons and interactive rows shall be comfortably tappable, with spacing that prevents accidental selection.
+Typography || Customer body text should normally be at least 16 CSS px; key prices and actions significantly larger. Avoid all-caps paragraphs and dense fine print.
+Color || High contrast; status is expressed through text/icon as well as color. Destructive actions use a separate confirmation pattern.
+Navigation || Role-specific bottom navigation or compact menu with no more than the core sections. The current primary flow hides unrelated navigation where helpful.
+Forms || React Hook Form controls, inline validation after blur/submit, plain-language messages and preserved values after errors.
+Feedback || Skeleton for loading, progress for upload, empty states with one next action, retry for recoverable failures and designed toast for background success.
+Motion || Subtle functional motion only; no background videos, heavy parallax, continuous glow or decorative animation in customer flow.
+[[TABLE 10]]
+Screen || Required content
+Referral landing || Dealer identity, one-sentence benefit and “Send material list”.
+Upload || Camera/gallery/files, previews, progress and remove/retry.
+Request details || Region, delivery yes/no, optional note/date/contact.
+Confirm request || Files, minimal summary and privacy statement.
+Request status || Reference, current step, secure link and offer count.
+Offer comparison || Simple cards with grand total first; sort by price or fastest delivery.
+Offer confirmation || Selected store, totals, phone/address and confirm action.
+Order tracking || Accepted, preparing, ready, dispatched and delivered.
+Delivery confirmation/dispute || Confirm received or report a problem.
+Telegram history || Active/completed requests for attached customers only.
+[[TABLE 11]]
+Screen || Required content
+Home || Referral count, active requests, completed orders and current earnings.
+Referral || Copy/share link, QR and short explanatory text.
+Create for customer || Same simplified upload flow plus consent/contact.
+Referred requests || Status list without confidential offers.
+Earnings || Estimated, approved, payable, paid and transaction rows.
+Payouts || Payout history, proof/reference and payout details.
+Profile/support || Verification status, region, payout details and support request.
+[[TABLE 12]]
+Screen || Required content
+Home || New requests, response deadlines, selected orders and debt summary.
+Request inbox || Assigned requests with clear open/declined/submitted state.
+Request detail || Attachment preview, region, delivery need and deadline.
+Offer form || Subtotal, delivery fee, delivery estimate, validity and note.
+Offer summary || Calculated grand total and explicit submit confirmation.
+Orders || Acceptance action and allowed fulfilment statuses.
+Completion || Final amount, receipt proof and delivered action.
+Finance || Debt entries, payments, aging and statement export.
+Profile/support || Service areas, categories, verification and dispute/support.
+[[TABLE 13]]
+Screen || Required content
+Dashboard || Operations and finance KPI according to permission.
+Applications || Dealer/store review, documents, approve/reject/correct.
+Requests || Moderation, tagging, matching, deadlines and attachments.
+Offers || Support visibility and invalidation with reason.
+Orders || Status board, final amount review, disputes and overrides.
+Store finance || Debt, payments, allocation, statements and aging.
+Dealer finance || Earnings, payable release, payouts and adjustments.
+Directories/settings || Regions, categories, timeouts, limits and templates.
+Users/permissions || Roles, suspension and sessions.
+Audit/health || Audit filters and integration/processing health.
+[[TABLE 14]]
+Layer || Required technology/approach
+Backend || NestJS + TypeScript
+ORM / database || TypeORM + PostgreSQL
+Frontend || React + TypeScript + Tailwind CSS
+Data fetching || Redux Toolkit Query (RTK Query)
+Forms || React Hook Form
+Routing || React Router or an equivalent lightweight React router selected at implementation start
+UI primitives || Accessible source-controlled components; no raw browser-default production UX
+Telegram || Telegram Bot API + Telegram Mini App integration
+Files || S3-compatible private object storage in production
+API style || Versioned REST JSON API with OpenAPI documentation
+[[TABLE 15]]
+Module || Responsibility
+Auth || Telegram init data, browser bot login, sessions, guest tokens and guards.
+Users and RBAC || Users, roles, permissions, status and role switching.
+Telegram || Webhook, deep links, bot menu and message adapter.
+Dealers || Applications, profiles, referral codes and assisted flow.
+Stores || Applications, profiles, service areas and categories.
+Customers || Optional profile, guest access and customer contact.
+Requests || Draft, attachments, moderation, matching and recipients.
+Offers || Store drafts/submissions/revisions, confidentiality and validity.
+Orders || Selection, store acceptance, fulfilment, completion and disputes.
+Commissions || Rule resolution, snapshots and calculation.
+Finance || Store ledger/payments, dealer ledger/payouts and reconciliation.
+Files || Upload metadata, object storage and authorized access.
+Notifications || Event templates, outbox, retries and history.
+Reporting || Operational/finance aggregates and exports.
+Admin || Admin-facing orchestration and settings; domain rules remain in domain modules.
+Audit || Append-only security/business audit and correlation.
+Health || Database, storage, Telegram and worker health.
+[[TABLE 16]]
+Convention || Requirement
+Base path || /api/v1
+Format || JSON; multipart upload or pre-signed upload flow for files
+Auth || Verified session for controlled roles; guest access token for a customer request
+Errors || { code, messageKey/message, fieldErrors, correlationId }
+Pagination || Cursor or page/limit consistently, with server-side sort/filter
+Idempotency || Idempotency-Key for request submit, offer select, completion, payment and payout creation
+Dates || ISO 8601 UTC
+Money || Lossless string representation in UZS
+Documentation || OpenAPI, protected in production
+[[TABLE 17]]
+Entity || Purpose || Key fields / relationships
+users || Platform identity and status || id, display name, phone, locale, status, timestamps
+telegram_accounts || Verified Telegram identity || user_id, Telegram user ID, username, names, verified time
+user_roles || Approved roles and permission context || user_id, role, status, approver, approval time
+auth_sessions || Refresh/session and browser-login state || user, token/nonce hash, type, expiry, revocation
+guest_access_tokens || Secure customer access to a request || request, token hash, expiry, revocation, attached user
+dealers || Dealer profile and finance settings || user, region, brigade/company, status, payout details, reward override
+dealer_referral_codes || Referral links and history || dealer, public code/hash, status, validity
+stores || Store profile and verification || owner user, legal/display name, tax ID, address, status, commission override
+store_service_areas || Where a store serves || store, region, active flag
+categories || Simple material matching categories || ID, name/translation key, status, sort order
+store_categories || Store/category membership || store, category, active flag
+regions || Region/district directory || ID, parent, name/translation key, status
+material_requests || Customer demand || public reference, customer user nullable, dealer nullable, region, status, deadlines, contact snapshot
+request_attachments || Uploaded material-list files || request, file, sort order, attachment type
+request_categories || Operations-assigned categories || request, category
+request_recipients || Stores invited to quote || request, store, status, sent/opened times, decline reason
+offers || Store’s full-list offer || request, store, subtotal, delivery fee, total, delivery estimate, validity, status, version
+offer_versions or audit data || Previous commercial values || offer, version, before/after values, actor, timestamp
+orders || Selected/accepted fulfilment || reference, request, offer, store, dealer, status, final amounts, contact/delivery snapshot
+order_status_history || Append-only order transitions || order, from/to status, actor, reason, timestamp
+disputes || Customer/store/admin issue handling || order, opener, type, status, resolution, assigned admin
+commission_rules || Versioned rate configuration || scope type/ID, store rate, dealer rate, effective dates, status
+order_commissions || Immutable calculation snapshot || order, base, rates, platform gross, dealer reward, platform net, finalization time
+store_ledger_entries || Store commission debt and adjustments || store, order, type, debit, credit, due date, source entry
+store_payments || Payment received from store || store, amount, method, date, reference, proof file, status
+store_payment_allocations || Payment-to-debt allocation || payment, ledger entry, allocated amount
+dealer_ledger_entries || Dealer earnings, payouts and adjustments || dealer, order, type, credit, debit, state/source entry
+dealer_payouts || Recorded dealer payout || dealer, amount, method, date, reference, proof file, status
+files || Private object metadata || storage key, original name, MIME, size, checksum, uploader, status
+notifications || Web/bot notification history || user, event type, template, payload, delivery status, attempts
+notification_outbox || Transactional pending delivery || event, aggregate, payload, status, next attempt
+audit_logs || Append-only security/business audit || actor, action, entity, before/after metadata, correlation ID, timestamp
+system_settings || Versioned configurable values || key, JSON value, effective time, updater
+[[TABLE 18]]
+Aggregate || Required lifecycle
+Dealer/store application || pending -> correction_required -> approved or rejected; approved may become suspended, re-approved or archived
+Request || draft -> submitted -> under_review -> published/collecting_offers -> selection_open -> selected -> completed; alternative terminal states: expired, canceled, disputed
+Offer || draft -> submitted -> revised; alternative states: withdrawn, expired, selected, not_selected, invalidated
+Order || pending_store_acceptance -> accepted -> preparing -> ready -> dispatched -> delivered_pending_confirmation -> completed; allowed exception states: canceled, disputed
+Store debt || open -> partially paid -> paid; may be overdue, disputed, adjusted or reversed
+Dealer earning || estimated -> approved -> payable -> paid; corrections use adjustment/reversal entries
+[[TABLE 19]]
+Method || Path || Access || Purpose
+POST || /api/v1/auth/telegram-mini-app || Telegram init data || Verify Telegram data and create session.
+POST || /api/v1/auth/browser-sessions || Public || Create bot/QR login nonce.
+GET || /api/v1/auth/browser-sessions/{id} || Public with nonce || Poll confirmed login status.
+POST || /api/v1/auth/refresh || Session || Rotate/refresh session.
+POST || /api/v1/auth/logout || Session || Revoke current session.
+POST || /api/v1/customer/requests/drafts || Guest/referral || Create draft and capture dealer referral.
+POST || /api/v1/customer/requests/{draftId}/attachments || Guest draft || Upload/add attachment.
+DELETE || /api/v1/customer/requests/{draftId}/attachments/{id} || Guest draft || Remove attachment.
+PUT || /api/v1/customer/requests/{draftId} || Guest draft || Update minimal request details.
+POST || /api/v1/customer/requests/{draftId}/submit || Guest draft || Validate and submit idempotently.
+GET || /api/v1/customer/access/{token} || Guest token || Open request/order view.
+GET || /api/v1/customer/access/{token}/offers || Guest token || List valid comparable offers.
+POST || /api/v1/customer/access/{token}/select-offer || Guest token || Select one offer and confirm contact.
+POST || /api/v1/customer/access/{token}/cancel || Guest token || Request cancellation.
+POST || /api/v1/customer/access/{token}/confirm-delivery || Guest token || Confirm received.
+POST || /api/v1/customer/access/{token}/disputes || Guest token || Report a problem.
+POST || /api/v1/customer/access/{token}/attach-telegram || Guest plus session || Attach request to verified customer identity.
+POST || /api/v1/customer/access/{token}/rotate-link || Customer/admin authorization || Rotate compromised guest link.
+GET || /api/v1/customer/requests || Customer session || Request history.
+GET || /api/v1/customer/requests/{id} || Customer session || Authenticated request details.
+[[TABLE 20]]
+Method || Path || Purpose
+GET || /api/v1/dealer/profile || Read dealer/application status.
+PUT || /api/v1/dealer/profile || Update permitted profile and payout details.
+POST || /api/v1/dealer/application/submit || Submit for approval.
+GET || /api/v1/dealer/referral || Get active link/code/QR payload.
+POST || /api/v1/dealer/referral/rotate || Rotate compromised code if allowed.
+POST || /api/v1/dealer/customer-requests/drafts || Create assisted customer draft.
+POST || /api/v1/dealer/customer-requests/{draftId}/submit || Submit assisted customer request.
+GET || /api/v1/dealer/requests || List attributed requests and business status.
+GET || /api/v1/dealer/requests/{id} || View non-confidential status.
+GET || /api/v1/dealer/earnings/summary || Estimated/approved/payable/paid totals.
+GET || /api/v1/dealer/earnings || Ledger transaction list.
+GET || /api/v1/dealer/payouts || Payout history.
+GET || /api/v1/dealer/statements/export || Export own statement.
+POST || /api/v1/dealer/support || Create support request.
+[[TABLE 21]]
+Method || Path || Purpose
+GET || /api/v1/store/profile || Read store/application profile.
+PUT || /api/v1/store/profile || Update profile, areas and categories.
+POST || /api/v1/store/application/submit || Submit verification application.
+GET || /api/v1/store/requests || Assigned request inbox.
+GET || /api/v1/store/requests/{id} || Request attachments and details.
+POST || /api/v1/store/requests/{id}/open || Record first opening if needed for metrics.
+POST || /api/v1/store/requests/{id}/decline || Decline with reason.
+POST || /api/v1/store/requests/{id}/offer-draft || Create/save offer draft.
+PUT || /api/v1/store/offers/{id} || Edit unselected draft/submitted offer.
+POST || /api/v1/store/offers/{id}/submit || Submit/revise offer.
+POST || /api/v1/store/offers/{id}/withdraw || Withdraw unselected offer.
+GET || /api/v1/store/orders || Store order list.
+GET || /api/v1/store/orders/{id} || Store order details.
+POST || /api/v1/store/orders/{id}/accept || Accept selected order.
+POST || /api/v1/store/orders/{id}/decline || Decline before acceptance.
+POST || /api/v1/store/orders/{id}/status || Perform allowed fulfilment transition.
+POST || /api/v1/store/orders/{id}/proof || Upload receipt/invoice proof.
+POST || /api/v1/store/orders/{id}/final-amount || Submit final subtotal/delivery.
+POST || /api/v1/store/orders/{id}/disputes || Open dispute.
+GET || /api/v1/store/finance/summary || Debt summary and aging.
+GET || /api/v1/store/finance/ledger || Debt/payment statement.
+GET || /api/v1/store/finance/export || Export own statement.
+POST || /api/v1/store/support || Create support request.
+[[TABLE 22]]
+Method || Path || Purpose
+GET || /api/v1/admin/dashboard/operations || Operations KPI.
+GET || /api/v1/admin/dashboard/finance || Finance KPI.
+GET || /api/v1/admin/applications/dealers || List dealer applications.
+POST || /api/v1/admin/applications/dealers/{id}/decision || Approve, reject or request correction.
+GET || /api/v1/admin/applications/stores || List store applications.
+POST || /api/v1/admin/applications/stores/{id}/decision || Approve, reject or request correction.
+GET/PUT || /api/v1/admin/users/{id} || Roles, status and sessions.
+POST || /api/v1/admin/users/{id}/revoke-sessions || Revoke sessions.
+GET/PUT || /api/v1/admin/dealers/{id} || Dealer settings/status.
+POST || /api/v1/admin/dealers/{id}/referral/rotate || Rotate referral code.
+GET/PUT || /api/v1/admin/stores/{id} || Store settings/status.
+GET || /api/v1/admin/requests || Moderation/search list.
+GET || /api/v1/admin/requests/{id} || Full request and recipient detail.
+POST || /api/v1/admin/requests/{id}/publish || Tag, select recipients and publish.
+POST || /api/v1/admin/requests/{id}/recipients || Add/remove/resend stores.
+POST || /api/v1/admin/requests/{id}/deadline || Extend, expire or reopen.
+POST || /api/v1/admin/requests/{id}/reject || Reject spam/invalid request.
+GET || /api/v1/admin/offers || Offer oversight.
+POST || /api/v1/admin/offers/{id}/invalidate || Invalidate with reason.
+POST || /api/v1/admin/requests/{id}/assisted-selection || Select with recorded customer authorization.
+GET || /api/v1/admin/orders || Order operations board.
+GET || /api/v1/admin/orders/{id} || Full order/finance/evidence detail.
+POST || /api/v1/admin/orders/{id}/override-status || Audited correction.
+POST || /api/v1/admin/orders/{id}/resolve-final-amount || Approve/correct final base.
+GET || /api/v1/admin/disputes || Dispute list.
+POST || /api/v1/admin/disputes/{id}/assign || Assign administrator.
+POST || /api/v1/admin/disputes/{id}/resolve || Resolve dispute and outcome.
+GET/POST || /api/v1/admin/commission-rules || List/create versioned rate configuration.
+POST || /api/v1/admin/commission-rules/{id}/activate || Activate validated rule.
+GET || /api/v1/admin/finance/store-debts || Debt/aging list.
+POST || /api/v1/admin/finance/store-payments || Record payment.
+POST || /api/v1/admin/finance/store-payments/{id}/allocate || Allocate payment.
+POST || /api/v1/admin/finance/store-adjustments || Adjustment, waiver or reversal.
+GET || /api/v1/admin/finance/dealer-earnings || Earning/payable list.
+POST || /api/v1/admin/finance/dealer-earnings/{id}/release || Authorized payable release.
+POST || /api/v1/admin/finance/dealer-payouts || Create payout.
+POST || /api/v1/admin/finance/dealer-payouts/{id}/approve || Approve payout where enabled.
+POST || /api/v1/admin/finance/dealer-payouts/{id}/mark-paid || Record paid reference/proof.
+POST || /api/v1/admin/finance/dealer-adjustments || Adjustment or reversal.
+GET || /api/v1/admin/reports/{report} || Filtered report or export.
+GET/PUT || /api/v1/admin/settings || System settings.
+GET/POST/PUT || /api/v1/admin/directories/{type} || Regions and categories.
+GET || /api/v1/admin/notifications || Notification delivery history.
+POST || /api/v1/admin/notifications/{id}/resend || Resend failed notification.
+GET || /api/v1/admin/audit || Audit viewer.
+GET || /api/v1/admin/health || Integration health.
+[[TABLE 23]]
+Method || Path || Purpose
+POST || /api/v1/integrations/telegram/webhook/{secret} || Receive Telegram updates idempotently.
+POST || /api/v1/internal/notifications/process || Worker-only outbox processing/trigger.
+POST || /api/v1/internal/deadlines/process || Worker-only expiry/timeout processing.
+POST || /api/v1/internal/files/cleanup || Worker-only abandoned temporary upload cleanup.
+GET || /health/live || Liveness without dependency checks.
+GET || /health/ready || Readiness with database/storage/Telegram checks.
+[[TABLE 24]]
+Area || Required V1 control
+Telegram identity || Validate Mini App initData on the server; reject stale or invalid signatures; never accept client-supplied role/Telegram ID as authority.
+Website login || Short-lived, random, one-time Telegram confirmation nonce; bind once and invalidate immediately.
+Sessions || Secure, HttpOnly and SameSite-appropriate cookies where compatible; token rotation/revocation; CSRF protection when cookie authentication is used.
+Guest access || High-entropy opaque token stored only as a hash; request-scoped permission; expiry/rotation/revocation; no sequential public ID.
+Authorization || Backend guards plus domain ownership checks; administrative permissions separated by operations/finance/super-admin scope.
+Object access || Prevent IDOR/BOLA: every request, offer, order, file and ledger lookup shall verify ownership/assignment/permission.
+Data exposure || Mask customer phone/address before store acceptance; exclude competitor prices and internal rates from unauthorized DTOs.
+Inputs || DTO schema validation, enum/length/range validation, normalized phone/region values and parameterized ORM queries.
+File uploads || Allowlisted types/signatures, size/count limits, randomized storage keys, malware-scan hook, no executable rendering, private storage.
+Output || Escape/sanitize user-entered text; prohibit unsafe HTML; apply a restrictive content-security policy compatible with Telegram WebApp.
+Abuse || Rate limits, bot protection where appropriate, duplicate-request signals, suspicious-upload logging and administrator suspension tools.
+Secrets || Environment/secret-store injection; no bot token, database password or storage secret in source, logs, frontend bundle or sample files.
+Transport || HTTPS only in production; secure proxy configuration; HSTS when domain readiness permits.
+Logs || Structured and access-controlled; redact bot tokens, session credentials, guest tokens, full phone/address and uploaded-file contents.
+Finance || Append-only ledgers, maker-checker option for payout, immutable commission snapshots, reason-required adjustments and reconciliation totals.
+Dependencies || Lockfiles, automated vulnerability scanning, controlled update cadence and urgent patch process for critical issues.
+Backups || Encrypted storage/access control, restricted restore permissions and documented deletion/retention behavior.
+[[TABLE 25]]
+Threat or misuse || Prevention/detection/response
+Dealer claims a customer after the request exists || Referral attribution is snapshotted on creation; later changes require audited admin exception and customer evidence.
+Store discovers competitor offer values || Offer APIs are store-scoped; DTOs never include other offers; access attempts are denied and logged.
+Customer selects two stores through rapid taps || Unique constraint plus serialized/locked selection transaction and idempotency key.
+Store reports a smaller sale to reduce commission || Store proof, customer confirmation, final-amount comparison, discrepancy queue and finance/admin resolution.
+Finance user alters paid records || Posted ledger rows are immutable; corrections create signed compensating entries with reason and audit trail.
+Stolen guest link || Expiry, token rotation, optional Telegram attach, manual revocation and limited data/actions.
+Malicious upload || Signature/type/size validation, private object storage, malware scan integration point and no direct execution/inline active content.
+Telegram webhook replay || Update ID deduplication, secret webhook path/header controls and idempotent processing.
+Suspended store keeps fulfilling actions || Session revocation plus server-side active-status check on every protected command.
+Notification leaks sensitive data || Messages contain minimal summaries and deep links; full request/customer detail remains behind authorization.
+[[TABLE 26]]
+Layer || Minimum coverage
+Unit tests || Commission calculation, referral attribution, status transitions, validation helpers, masking, permission policies and ledger allocation.
+Module/integration tests || TypeORM repositories with PostgreSQL, transactional selection, order completion, commission posting, payment/payout, guest token and Telegram auth verification.
+API end-to-end tests || Main customer/dealer/store/admin flows, authorization boundaries, idempotency, validation and documented error contracts.
+Frontend component tests || Forms, upload states, dialogs/sheets, offer cards, status timeline, finance summaries and accessibility behavior.
+Browser journey tests || Guest request to completion, Telegram-controlled role entry where testable, store offer, customer choice and admin reconciliation.
+Security tests || IDOR/BOLA attempts, role escalation, invalid Telegram data, expired guest link, upload abuse, rate-limit behavior and sensitive-response review.
+Performance tests || Main read/write endpoints under agreed pilot concurrency; large allowed uploads; notification/deadline worker backlog.
+Manual device tests || Telegram WebApp and browser on lower-spec Android, mid-range Android, iOS and desktop; slow/unstable network behavior.
+Recovery tests || Database backup restore, failed migration rollback, notification retry/dead-letter and duplicate job reprocessing.
+[[TABLE 27]]
+Component || Responsibility
+Web frontend || React responsive application used as Telegram Mini App and normal website.
+API application || NestJS REST API, authentication, domain services and administrative operations.
+Background worker || Notification outbox, deadlines, retries, cleanup, exports and asynchronous jobs; may initially share the repository/runtime image with the API but runs as a separate process.
+PostgreSQL || Authoritative transactional database and ledger storage.
+Object storage || Private material-list files, proofs and generated exports through an S3-compatible abstraction.
+Telegram bot/webhook || Controlled-role identity, notifications and Mini App/deep-link launcher.
+Reverse proxy/platform ingress || HTTPS termination, routing, request limits and security headers.
+Monitoring/logging || Health checks, structured logs, error tracking, metrics and alerting.
+[[TABLE 28]]
+Environment || Purpose || Data rule
+Local || Developer execution and automated tests. || Generated/test data only.
+Test/CI || Repeatable unit, integration and E2E pipelines. || Ephemeral isolated data.
+Staging || Product/operations/finance acceptance using production-like configuration. || Synthetic or approved masked data.
+Production || Real pilot users and transactions. || Strict access, backup, monitoring and change control.
+[[TABLE 29]]
+Deliverable || Required contents
+Source repository || Backend, frontend, bot/worker integration, migrations, tests and scripts.
+Architecture documentation || Module boundaries, dependency rules, main sequences, data model and deployment view.
+API documentation || OpenAPI document, authentication flows, errors, enums and examples.
+Database package || TypeORM migrations, seed/bootstrap process and data dictionary.
+Frontend design system || Tokens, reusable accessible primitives and responsive layout rules.
+Environment documentation || Complete variable list without secret values, local/staging/production setup.
+Operations runbook || Deploy, migrate, rollback, health check, backup/restore, alerts and common incidents.
+Test evidence || Automated reports plus manual mobile/Telegram/UAT checklist.
+Administrator guide || Role approval, request publication, dispute, commission, payment, payout and reporting procedures.
+Pilot handover || Production URLs/bot, access ownership, known limitations and support/escalation process.
+[[TABLE 30]]
+Future capability || V1 preparation only
+Native Android/iOS apps || Versioned API, role/session abstraction, mobile-safe DTOs and no business logic trapped in React views.
+Product catalog and item pricing || Category/directory identifiers and request-file model remain extensible; no SKU/inventory tables required now.
+OCR/AI material extraction || Uploaded file metadata and manual structured tags remain available for a future extraction pipeline.
+Item-level or multi-store split order || Order/offer schema uses stable line/reference boundaries where practical, but V1 enforces one selected store.
+Online customer payment/escrow || Finance module separates commercial order value from platform ledger; no customer-payment gateway in V1.
+Logistics marketplace/tracking || Delivery fields/statuses and provider-neutral interfaces can be extended without a driver module now.
+Ratings/reviews || Completed-order references can support verified reviews later; no rating score affects V1 matching.
+In-app chat || Notifications and support/dispute records remain structured; no real-time chat service in V1.
+Advanced automated matching || Region/category directories and assignment records permit future scoring; V1 is admin-reviewed.
+Demand/market analytics || Operational facts use reliable timestamps/categories; no government/public analytics dashboard in V1.
+Store subscription plans || Store profile/permissions are extensible; no premium gating or recurring billing in V1.
+Corporate procurement || Customer/request ownership can evolve toward organizations; V1 uses individual request ownership.
+Multiple store branches/representatives || Store/user relationship should support extension, but V1 may launch with one primary representative per store.
+Tax/fiscal integration || Receipt evidence and reference fields are preserved; no external tax API dependency in V1.
+[[TABLE 31]]
+Setting || Suggested V1 default || Status/notes
+Default store commission rate || Not preset || Business confirmation required. May be overridden per store/category/period.
+Default dealer reward rate || Not preset || Business confirmation required. Must normally be less than or equal to store commission.
+Commission base || Final verified material subtotal || Delivery fee excluded by default; configurable policy.
+Store offer deadline || 24 hours || Operations may extend before/after expiry according to permissions.
+Offer validity after submission || 48 hours or request deadline || Use the earlier unless store provides a valid-until time.
+Selected-store acceptance timeout || 2 hours during business window || Business hours/time-zone behavior must be confirmed.
+Customer delivery-confirmation window || 24 hours after store marks delivered || Auto-completion only when evidence/rules allow; otherwise operations review.
+Store debt due period || 7 calendar days after posting || Business confirmation required.
+Dealer earning release || After related store commission is collected || Authorized override permitted with reason.
+Dealer payout schedule/minimum || Not preset || Business confirmation required. Could be weekly and/or threshold-based.
+Referral persistence || 30 days from first valid referral visit || Direct assisted creation can attribute immediately; customer consent applies.
+Guest request-link lifetime || 90 days after last relevant order action || Token can be rotated/revoked; retained records remain internal.
+Namangan pilot categories || 5-6 categories || Final category list supplied by operations.
+Initial store assignment limit || Configurable, e.g. 5-15 stores || Prevents spam while allowing competition; operations may add recipients.
+[[TABLE 32]]
+Setting || Suggested V1 default || Notes
+Material-list attachments || Up to 10 files || Customer-friendly multi-photo receipt/smeta support.
+Maximum per file || 20 MB || Compress client images before upload where safe.
+Maximum per request || 50 MB || Configurable by environment.
+Allowed material-list types || JPEG, PNG, WebP, PDF, XLS/XLSX || Exact MIME/signature allowlist required.
+Allowed proof types || JPEG, PNG, WebP, PDF || No office macros/executables.
+Temporary upload lifetime || 24 hours || Unattached files cleaned by worker.
+Notification retries || Exponential schedule, max 5 || Failed delivery retained for operations.
+Access token lifetime || 15 minutes || Implementation may use secure server session; exact model documented.
+Refresh/session lifetime || 30 days controlled roles || Revocable; shorter for administrators may be configured.
+Telegram auth age || 5 minutes for Mini App exchange || Login nonce/session expiries separate.
+API pagination default/max || 20 / 100 || Cursor pagination preferred for growing activity lists.
+Application time zone || Asia/Tashkent for display || Persist timestamps in UTC.
+Currency || UZS || Store in integer smallest unit; no floating-point finance.
+Default language || Uzbek Latin || Translation resource keys required.
+Data retention || Per Section 14.3 || Final values subject to legal/business approval.
+[[TABLE 33]]
+Data || Suggested retention
+Temporary, unattached uploads || 24 hours.
+Expired login nonces || 30 days of hashed/audit metadata or shorter security-approved period.
+Guest access-token hashes || While request/order remains accessible plus defined closure period.
+Notification delivery logs || 180 days, configurable.
+Generated export files || 24 hours; report query/audit metadata retained longer.
+Operational application logs || 30-90 days depending on hosting/security capacity.
+Request/order attachments and proof || Business/legal retention period; confirmation required.
+Financial ledgers, payment/payout proof and audit events || Long-term according to accounting/legal requirements; not deleted by routine cleanup.
+Rejected/abandoned applications || Configurable, e.g. 180 days, then anonymize where lawful.
+[[TABLE 34]]
+Term || Meaning in this TZ
+Material list / smeta / receipt || Customer-provided file(s) or manual summary describing materials to purchase. V1 does not require OCR extraction.
+Customer || Material buyer/house owner; may remain a guest or attach Telegram.
+Dealer / builder || Approved referrer who brings the customer and may earn reward from a completed attributed sale.
+Store || Approved construction-material seller that submits and fulfils an offer.
+Request || Customer’s material-list procurement request distributed to selected stores.
+Recipient/assignment || Record allowing one store to view/respond to one request.
+Offer || One store’s confidential full-list commercial proposal, including material subtotal, delivery fee and terms.
+Candidate order || Temporary order state after customer selection while the store accepts.
+Order || Accepted commercial fulfilment record between customer and selected store.
+Commission base || Verified amount to which the store commission/dealer reward rates are applied.
+Store debt || Amount the store owes the platform from completed commissioned sale.
+Dealer earning || Reward attributed to the dealer; progresses through pending/approved/payable/paid/reversed states.
+Ledger || Append-only financial entries representing debts, payments, earnings, payouts, adjustments and reversals.
+Guest token || High-entropy scoped capability that lets a customer access one request without account registration.
+Telegram Mini App || Responsive web application opened inside Telegram with verified initialization data.
+Operations administrator || Internal user managing applications, requests, assignments, orders and support.
+Finance administrator || Internal user managing commission configuration, debt, payments, earnings, payouts and reconciliation.
+[[TABLE 35]]
+Prefix || Area || Count
+AUTH || Authentication, identity and authorization || 18
+CUS || Customer functionality || 28
+DLR || Dealer/builder functionality || 20
+STR || Store functionality || 30
+CORE || Request, offer and order domain || 30
+FIN || Commission, debt and dealer earning || 36
+ADM || Administration || 40
+TEL / NOT / FILE / RPT || Telegram, notifications, files and reporting || 22
+NFR || Non-functional requirements || 30
+AC || End-to-end acceptance scenarios || 15
+Total explicit requirement IDs ||  || 269

@@ -12,6 +12,7 @@ import { OrdersService } from "./orders.service";
 @Module({
   controllers: [OrdersController],
   imports: [AuditModule, FinanceModule, NotificationsModule, TypeOrmModule.forFeature([MaterialRequestEntity, StoreOfferEntity, OrderEntity])],
-  providers: [OrdersService]
+  providers: [OrdersService],
+  exports: [OrdersService]
 })
 export class OrdersModule {}

@@ -17,6 +17,9 @@ export class DealerEntity {
   @Column({ name: "company_name", nullable: true, type: "varchar" })
   companyName!: string | null;
 
+  @Column({ name: "telegram_user_id", nullable: true, type: "varchar" })
+  telegramUserId!: string | null;
+
   @Column({ name: "referral_code", unique: true })
   referralCode!: string;
 

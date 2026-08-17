@@ -62,6 +62,11 @@ export class CreateMaterialRequestDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(500)
+  deliveryNote?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(120)
   dealerReferral?: string;
 

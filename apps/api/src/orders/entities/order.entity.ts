@@ -32,11 +32,26 @@ export class OrderEntity {
   @Column({ name: "accepted_amount_uzs", type: "integer" })
   acceptedAmountUzs!: number;
 
+  @Column({ name: "final_amount_uzs", nullable: true, type: "integer" })
+  finalAmountUzs!: number | null;
+
   @Column({ default: "pending_store_acceptance" })
   status!: string;
 
   @Column({ name: "status_note", nullable: true, type: "text" })
   statusNote!: string | null;
+
+  @Column({ name: "delivery_proof_note", nullable: true, type: "text" })
+  deliveryProofNote!: string | null;
+
+  @Column({ name: "delivery_proof_file_name", nullable: true, type: "varchar" })
+  deliveryProofFileName!: string | null;
+
+  @Column({ name: "delivered_at", nullable: true, type: "timestamptz" })
+  deliveredAt!: Date | null;
+
+  @Column({ name: "confirmed_at", nullable: true, type: "timestamptz" })
+  confirmedAt!: Date | null;
 
   @CreateDateColumn({ name: "created_at" })
   createdAt!: Date;

@@ -2,7 +2,19 @@ import { useEffect, useMemo, useState } from "react";
 import { ROLE_LABELS, USER_ROLES, type UserRole } from "@smeta/shared";
 import { ShieldCheck } from "lucide-react";
 import { StatusPill } from "../../components/ui/StatusPill";
-import { fetchAuditLogs, fetchAuthSession, fetchPermissionMatrix, type AuditLogResponse, type PermissionMatrixResponse } from "../../lib/api";
+import {
+  cancelBrowserLogin,
+  clearSessionToken,
+  createBrowserLogin,
+  fetchAuditLogs,
+  fetchAuthSession,
+  fetchPermissionMatrix,
+  pollBrowserLogin,
+  storeSessionToken,
+  type AuditLogResponse,
+  type BrowserLoginResponse,
+  type PermissionMatrixResponse
+} from "../../lib/api";
 
 const permissionLabels: Record<string, string> = {
   "audit.read": "Audit tarixini ko'rish",
@@ -15,7 +27,9 @@ const permissionLabels: Record<string, string> = {
   "offers.read": "Takliflarni ko'rish",
   "offers.select": "Taklif tanlash",
   "orders.fulfill": "Buyurtmani bajarish",
+  "orders.confirm": "Buyurtmani mijoz tasdiqlashi",
   "orders.read": "Buyurtmalarni ko'rish",
+  "reports.read": "V1 hisobotlarni ko'rish",
   "requests.assign_stores": "So'rovni do'konlarga yuborish",
   "requests.create": "Material so'rovi yaratish",
   "requests.moderate": "So'rovni moderatsiya qilish",
@@ -30,14 +44,19 @@ const permissionLabels: Record<string, string> = {
 const actionLabels: Record<string, string> = {
   "dealer.application_created": "Usta arizasi yaratildi",
   "dealer.status_updated": "Usta statusi o'zgardi",
-  "finance.payment_recorded": "To'lov yozildi",
   "finance.snapshot_created": "Moliya snapshot yaratildi",
+  "finance.payment_recorded": "Moliya to'lovi yozildi",
   "material_request.assigned_to_stores": "So'rov do'konlarga yuborildi",
   "material_request.created": "Material so'rovi yaratildi",
   "material_request.status_updated": "So'rov statusi o'zgardi",
   "order.created_from_offer": "Taklifdan buyurtma yaratildi",
   "order.status_updated": "Buyurtma statusi o'zgardi",
+  "order.delivery_confirmed": "Yetkazish mijoz tomonidan tasdiqlandi",
   "store_offer.created": "Do'kon taklifi yaratildi",
+  "store.application_created": "Do'kon arizasi yaratildi",
+  "store.created": "Do'kon yaratildi",
+  "store.profile_updated": "Do'kon profili yangilandi",
+  "store.status_updated": "Do'kon statusi o'zgardi",
   "store_offer.updated": "Do'kon taklifi yangilandi"
 };
 
@@ -46,6 +65,8 @@ export function SecurityView() {
   const [permissions, setPermissions] = useState<string[]>([]);
   const [matrix, setMatrix] = useState<PermissionMatrixResponse>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogResponse[]>([]);
+  const [browserLogin, setBrowserLogin] = useState<BrowserLoginResponse | null>(null);
+  const [browserLoginStatus, setBrowserLoginStatus] = useState<string>("not_started");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -73,6 +94,51 @@ export function SecurityView() {
     [activeRole, matrix, permissions.length]
   );
 
+  async function startBrowserLogin() {
+    try {
+      const login = await createBrowserLogin(activeRole);
+      setBrowserLogin(login);
+      setBrowserLoginStatus(login.status);
+      setError(null);
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : "Telegram login yaratilmadi");
+    }
+  }
+
+  async function pollLogin() {
+    if (!browserLogin) {
+      return;
+    }
+
+    try {
+      const result = await pollBrowserLogin(browserLogin.nonce);
+      setBrowserLoginStatus(result.status);
+
+      if (result.status === "authenticated") {
+        storeSessionToken(result.accessToken);
+        await loadSecurityData(activeRole);
+      }
+    } catch (pollError) {
+      setError(pollError instanceof Error ? pollError.message : "Telegram login holati olinmadi");
+    }
+  }
+
+  async function cancelLogin() {
+    if (!browserLogin) {
+      return;
+    }
+
+    await cancelBrowserLogin(browserLogin.nonce);
+    setBrowserLoginStatus("canceled");
+  }
+
+  async function logoutLocalSession() {
+    clearSessionToken();
+    setBrowserLogin(null);
+    setBrowserLoginStatus("not_started");
+    await loadSecurityData(activeRole);
+  }
+
   return (
     <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
       <section className="rounded-lg border border-smeta-line bg-white p-5 shadow-sm">
@@ -84,8 +150,8 @@ export function SecurityView() {
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-smeta-mauve">Auth va rollar</p>
             <h3 className="mt-1 text-xl font-semibold">Rol ruxsatlari skeletoni</h3>
             <p className="mt-2 text-sm leading-6 text-smeta-mauve">
-              Bu sahifa hozircha lokal rol preview sifatida ishlaydi. Frontend API chaqiruvlari dev rejimda `x-smeta-role` headerini yuboradi;
-              keyingi auth etapida Telegram Mini App initData va real sessiya shu permission matritsaga ulanadi.
+              V1 browser login qisqa muddatli Telegram nonce orqali ishlaydi. Dev rejimda role preview saqlangan, real sessiya bo'lsa API
+              `x-smeta-session` bilan ishlaydi.
             </p>
           </div>
         </div>
@@ -115,6 +181,34 @@ export function SecurityView() {
             <p className="text-xs font-semibold uppercase tracking-[0.13em] text-smeta-mauve">Ruxsatlar</p>
             <p className="mt-2 text-lg font-semibold">{rolePermissionCount} ta</p>
           </div>
+        </div>
+
+        <div className="mt-5 rounded-md border border-smeta-line bg-smeta-paper p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.13em] text-smeta-mauve">Telegram browser login</p>
+              <p className="mt-1 text-sm font-semibold">Status: {browserLoginStatus}</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button className="rounded-md bg-smeta-ink px-3 py-2 text-sm font-bold text-white" onClick={() => void startBrowserLogin()}>
+                Login link
+              </button>
+              <button className="rounded-md border border-smeta-line px-3 py-2 text-sm font-bold" disabled={!browserLogin} onClick={() => void pollLogin()}>
+                Poll
+              </button>
+              <button className="rounded-md border border-smeta-line px-3 py-2 text-sm font-bold" disabled={!browserLogin} onClick={() => void cancelLogin()}>
+                Cancel
+              </button>
+              <button className="rounded-md border border-smeta-line px-3 py-2 text-sm font-bold" onClick={() => void logoutLocalSession()}>
+                Clear session
+              </button>
+            </div>
+          </div>
+          {browserLogin ? (
+            <a className="mt-3 block break-all rounded-md bg-white px-3 py-2 text-xs font-semibold text-smeta-clay" href={browserLogin.deepLink}>
+              {browserLogin.qrPayload}
+            </a>
+          ) : null}
         </div>
 
         {error ? <p className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}

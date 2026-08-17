@@ -1,5 +1,7 @@
-import { Column, CreateDateColumn, Entity, ManyToOne, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
+import { Column, CreateDateColumn, Entity, ManyToOne, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
 import { OrderEntity } from "../../orders/entities/order.entity";
+import { FinancePaymentEntity } from "./finance-payment.entity";
+import { FinanceAdjustmentEntity } from "./finance-adjustment.entity";
 
 @Entity("finance_ledger")
 export class FinanceLedgerEntity {
@@ -42,11 +44,23 @@ export class FinanceLedgerEntity {
   @Column({ default: "payable" })
   status!: string;
 
+  @Column({ name: "due_at", nullable: true, type: "timestamptz" })
+  dueAt!: Date | null;
+
   @Column({ name: "dealer_referral", nullable: true, type: "varchar" })
   dealerReferral!: string | null;
 
+  @Column({ name: "dealer_id", nullable: true, type: "uuid" })
+  dealerId!: string | null;
+
   @Column({ name: "payment_note", nullable: true, type: "text" })
   paymentNote!: string | null;
+
+  @OneToMany(() => FinancePaymentEntity, (payment) => payment.ledger)
+  payments!: FinancePaymentEntity[];
+
+  @OneToMany(() => FinanceAdjustmentEntity, (adjustment) => adjustment.ledger)
+  adjustments!: FinanceAdjustmentEntity[];
 
   @CreateDateColumn({ name: "created_at" })
   createdAt!: Date;

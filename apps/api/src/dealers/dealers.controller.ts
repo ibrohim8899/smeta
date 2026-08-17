@@ -25,6 +25,30 @@ export class DealersController {
     return this.dealersService.findByReferralCode(referralCode);
   }
 
+  @Get(":id/referral-tools")
+  @RequirePermissions("dealers.read")
+  referralTools(@Param("id") id: string) {
+    return this.dealersService.referralTools(id);
+  }
+
+  @Post(":id/referral/rotate")
+  @RequirePermissions("dealers.moderate")
+  rotateReferral(@Param("id") id: string) {
+    return this.dealersService.rotateReferral(id);
+  }
+
+  @Get(":id/requests")
+  @RequirePermissions("dealers.read")
+  attributedRequests(@Param("id") id: string) {
+    return this.dealersService.attributedRequests(id);
+  }
+
+  @Get(":id/summary")
+  @RequirePermissions("dealers.read")
+  summary(@Param("id") id: string) {
+    return this.dealersService.summary(id);
+  }
+
   @Patch(":id/status")
   @RequirePermissions("dealers.moderate")
   updateStatus(@Param("id") id: string, @Body() dto: UpdateDealerStatusDto) {

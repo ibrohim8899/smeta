@@ -8,9 +8,14 @@
   ],
   "scripts": {
     "dev": "npm run build --workspace @smeta/shared && concurrently -n api,web -c magenta,cyan \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:full": "npm run build --workspace @smeta/shared && concurrently -n api,web,tg -c magenta,cyan,green \"npm run dev:api\" \"npm run dev:web\" \"npm run telegram:poll\"",
     "dev:api": "npm run dev --workspace @smeta/api",
     "dev:web": "npm run dev --workspace @smeta/web",
     "build": "npm run build --workspace @smeta/shared && npm run build --workspace @smeta/api && npm run build --workspace @smeta/web",
+    "migration:run": "npm run migration:run --workspace @smeta/api",
+    "migration:revert": "npm run migration:revert --workspace @smeta/api",
+    "telegram:setup": "node scripts/setup-telegram-bot.mjs",
+    "telegram:poll": "node scripts/poll-telegram-updates.mjs --watch",
     "typecheck": "npm run typecheck --workspace @smeta/shared && npm run typecheck --workspace @smeta/api && npm run typecheck --workspace @smeta/web"
   },
   "devDependencies": {

@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
+import type { UserRole } from "@smeta/shared";
 import { Repository } from "typeorm";
 import { AuditService } from "../audit/audit.service";
 import { MaterialRequestEntity } from "../material-requests/entities/material-request.entity";
@@ -7,6 +8,8 @@ import { NotificationsService } from "../notifications/notifications.service";
 import { StoresService } from "../stores/stores.service";
 import { AssignStoresDto } from "./dto/assign-stores.dto";
 import { CreateStoreOfferDto } from "./dto/create-store-offer.dto";
+import { DeclineRequestDto } from "./dto/decline-request.dto";
+import { WithdrawOfferDto } from "./dto/withdraw-offer.dto";
 import { RequestRecipientEntity } from "./entities/request-recipient.entity";
 import { StoreOfferEntity } from "./entities/store-offer.entity";
 
@@ -78,13 +81,15 @@ export class OffersService {
       stores.map((store) =>
         this.notificationsService.enqueue({
           bodyUz: `${request.publicCode} bo'yicha ${request.category} so'rovi sizga yuborildi. Narx taklifini kiriting.`,
+          channel: store.telegramUserId ? "telegram" : "web",
           eventType: "material_request.assigned_to_store",
           metadata: {
+            buttonText: "So'rovni ochish",
             requestId: request.id,
             storeId: store.id
           },
           recipientRole: "store",
-          recipientRef: store.id,
+          recipientRef: store.telegramUserId ?? store.id,
           titleUz: `Yangi so'rov: ${request.publicCode}`
         })
       )
@@ -125,6 +130,22 @@ export class OffersService {
       throw new NotFoundException("Do'kon topilmadi");
     }
 
+    await this.assertStoreCanRespond(request.id, store.id);
+
+    const materialSubtotalUzs = dto.materialSubtotalUzs ?? dto.totalAmountUzs;
+    const deliveryFeeUzs = dto.deliveryFeeUzs ?? 0;
+    const completeListAvailable = dto.completeListAvailable ?? true;
+
+    if (!materialSubtotalUzs) {
+      throw new BadRequestException("Material subtotal summasi kiritilishi kerak");
+    }
+
+    if (!completeListAvailable) {
+      throw new BadRequestException("V1 taklif butun material ro'yxatini qamrab olishi kerak");
+    }
+
+    const finalTotalUzs = materialSubtotalUzs + deliveryFeeUzs;
+
     const existingOffer = await this.offersRepository.findOne({
       relations: {
         request: true
@@ -136,14 +157,21 @@ export class OffersService {
         store: {
           id: store.id
         },
-        status: "submitted"
       }
     });
 
     if (existingOffer) {
+      if (existingOffer.status !== "submitted") {
+        throw new BadRequestException("Bu taklif tanlov bosqichidan keyin qayta tahrirlanmaydi");
+      }
+
+      existingOffer.completeListAvailable = completeListAvailable;
+      existingOffer.deliveryEstimate = dto.deliveryEstimate || null;
+      existingOffer.deliveryFeeUzs = deliveryFeeUzs;
       existingOffer.deliveryIncluded = dto.deliveryIncluded ?? false;
+      existingOffer.materialSubtotalUzs = materialSubtotalUzs;
       existingOffer.note = dto.note || null;
-      existingOffer.totalAmountUzs = dto.totalAmountUzs;
+      existingOffer.totalAmountUzs = finalTotalUzs;
       existingOffer.validityHours = dto.validityHours ?? 48;
       const saved = await this.offersRepository.save(existingOffer);
 
@@ -152,19 +180,21 @@ export class OffersService {
         entityId: saved.id,
         entityType: "store_offer",
         metadata: {
+          deliveryFeeUzs: saved.deliveryFeeUzs,
+          finalTotalUzs: saved.totalAmountUzs,
+          materialSubtotalUzs: saved.materialSubtotalUzs,
           requestPublicCode: request.publicCode,
-          storeName: store.name,
-          totalAmountUzs: saved.totalAmountUzs
+          storeName: store.name
         }
       });
 
       await this.notificationsService.enqueue({
-        bodyUz: `${store.name} ${request.publicCode} uchun taklifini yangiladi. Yangi summa: ${saved.totalAmountUzs.toLocaleString("uz-UZ")} UZS.`,
+        bodyUz: `${store.name} ${request.publicCode} uchun taklifini yangiladi. Yakuniy summa: ${saved.totalAmountUzs.toLocaleString("uz-UZ")} UZS.`,
         eventType: "store_offer.updated",
         metadata: {
+          finalTotalUzs: saved.totalAmountUzs,
           offerId: saved.id,
-          requestId: request.id,
-          totalAmountUzs: saved.totalAmountUzs
+          requestId: request.id
         },
         recipientRole: "admin",
         titleUz: "Do'kon taklifi yangilandi"
@@ -174,12 +204,16 @@ export class OffersService {
     }
 
     const offer = this.offersRepository.create({
+      completeListAvailable,
+      deliveryEstimate: dto.deliveryEstimate || null,
+      deliveryFeeUzs,
       deliveryIncluded: dto.deliveryIncluded ?? false,
+      materialSubtotalUzs,
       note: dto.note || null,
       request,
       status: "submitted",
       store,
-      totalAmountUzs: dto.totalAmountUzs,
+      totalAmountUzs: finalTotalUzs,
       validityHours: dto.validityHours ?? 48
     });
 
@@ -192,19 +226,21 @@ export class OffersService {
       entityId: saved.id,
       entityType: "store_offer",
       metadata: {
+        deliveryFeeUzs: saved.deliveryFeeUzs,
+        finalTotalUzs: saved.totalAmountUzs,
+        materialSubtotalUzs: saved.materialSubtotalUzs,
         requestPublicCode: request.publicCode,
-        storeName: store.name,
-        totalAmountUzs: saved.totalAmountUzs
+        storeName: store.name
       }
     });
 
     await this.notificationsService.enqueue({
-      bodyUz: `${store.name} ${request.publicCode} uchun ${saved.totalAmountUzs.toLocaleString("uz-UZ")} UZS taklif yubordi.`,
+      bodyUz: `${store.name} ${request.publicCode} uchun ${saved.totalAmountUzs.toLocaleString("uz-UZ")} UZS yakuniy taklif yubordi.`,
       eventType: "store_offer.created",
       metadata: {
+        finalTotalUzs: saved.totalAmountUzs,
         offerId: saved.id,
-        requestId: request.id,
-        totalAmountUzs: saved.totalAmountUzs
+        requestId: request.id
       },
       recipientRole: "admin",
       titleUz: "Yangi do'kon taklifi"
@@ -213,8 +249,131 @@ export class OffersService {
     return this.toOfferResponse(saved);
   }
 
-  async findOffers(requestId: string) {
+  async declineRequest(requestId: string, storeId: string, dto: DeclineRequestDto) {
     const request = await this.getRequest(requestId);
+    const [store] = await this.storesService.findByIds([storeId]);
+
+    if (!store) {
+      throw new NotFoundException("Do'kon topilmadi");
+    }
+
+    const recipient = await this.getRecipient(request.id, store.id);
+
+    if (recipient.status === "responded") {
+      throw new BadRequestException("Taklif yuborgan do'kon bu so'rovni decline qila olmaydi");
+    }
+
+    recipient.status = "declined";
+    await this.recipientsRepository.save(recipient);
+
+    await this.auditService.record({
+      action: "request_recipient.declined",
+      entityId: recipient.id,
+      entityType: "request_recipient",
+      metadata: {
+        publicCode: request.publicCode,
+        storeName: store.name
+      },
+      reason: dto.reason ?? null
+    });
+
+    await this.notificationsService.enqueue({
+      bodyUz: `${store.name} ${request.publicCode} so'rovini rad etdi.${dto.reason ? ` Sabab: ${dto.reason}` : ""}`,
+      eventType: "request_recipient.declined",
+      metadata: {
+        requestId: request.id,
+        storeId: store.id
+      },
+      recipientRole: "admin",
+      titleUz: "Do'kon so'rovni rad etdi"
+    });
+
+    return {
+      assignedAt: recipient.assignedAt,
+      id: recipient.id,
+      status: recipient.status,
+      store: recipient.store
+    };
+  }
+
+  async withdrawOffer(requestId: string, offerId: string, dto: WithdrawOfferDto) {
+    const request = await this.getRequest(requestId);
+    const offer = await this.offersRepository.findOne({
+      relations: {
+        request: true
+      },
+      where: {
+        id: offerId,
+        request: {
+          id: request.id
+        }
+      }
+    });
+
+    if (!offer) {
+      throw new NotFoundException("Taklif topilmadi");
+    }
+
+    if (offer.status !== "submitted") {
+      throw new BadRequestException("Faqat hali tanlanmagan submitted taklif withdraw qilinadi");
+    }
+
+    offer.status = "withdrawn";
+    const saved = await this.offersRepository.save(offer);
+
+    const recipient = await this.recipientsRepository.findOne({
+      relations: {
+        request: true
+      },
+      where: {
+        request: {
+          id: request.id
+        },
+        store: {
+          id: offer.store.id
+        }
+      }
+    });
+
+    if (recipient) {
+      recipient.status = "withdrawn";
+      await this.recipientsRepository.save(recipient);
+    }
+
+    await this.auditService.record({
+      action: "store_offer.withdrawn",
+      entityId: saved.id,
+      entityType: "store_offer",
+      metadata: {
+        finalTotalUzs: saved.totalAmountUzs,
+        requestPublicCode: request.publicCode,
+        storeName: saved.store.name
+      },
+      reason: dto.reason ?? null
+    });
+
+    await this.notificationsService.enqueue({
+      bodyUz: `${saved.store.name} ${request.publicCode} uchun taklifini qaytarib oldi.${dto.reason ? ` Sabab: ${dto.reason}` : ""}`,
+      eventType: "store_offer.withdrawn",
+      metadata: {
+        offerId: saved.id,
+        requestId: request.id
+      },
+      recipientRole: "admin",
+      titleUz: "Do'kon taklifi qaytarib olindi"
+    });
+
+    return this.toOfferResponse(saved);
+  }
+
+  async findOffers(requestId: string, scope?: { role?: UserRole; storeId?: string }) {
+    const request = await this.getRequest(requestId);
+    const storeScoped = scope?.role === "store";
+
+    if (storeScoped && !scope.storeId) {
+      throw new BadRequestException("Do'kon takliflarini ko'rish uchun storeId kerak");
+    }
+
     const offers = await this.offersRepository.find({
       order: {
         totalAmountUzs: "ASC"
@@ -225,7 +384,14 @@ export class OffersService {
       where: {
         request: {
           id: request.id
-        }
+        },
+        ...(storeScoped
+          ? {
+              store: {
+                id: scope.storeId
+              }
+            }
+          : {})
       }
     });
 
@@ -267,15 +433,58 @@ export class OffersService {
     }
   }
 
+  private async assertStoreCanRespond(requestId: string, storeId: string) {
+    const recipient = await this.getRecipient(requestId, storeId);
+
+    if (recipient.status === "declined" || recipient.status === "withdrawn") {
+      throw new BadRequestException("Bu do'kon ushbu so'rov bo'yicha imkoniyatni yopgan");
+    }
+  }
+
+  private async getRecipient(requestId: string, storeId: string) {
+    const recipient = await this.recipientsRepository.findOne({
+      relations: {
+        request: true
+      },
+      where: {
+        request: {
+          id: requestId
+        },
+        store: {
+          id: storeId
+        }
+      }
+    });
+
+    if (!recipient) {
+      throw new BadRequestException("Do'kon bu so'rovga biriktirilmagan");
+    }
+
+    if (!recipient.store.active || recipient.store.status !== "approved") {
+      throw new BadRequestException("Faol bo'lmagan do'kon taklif yubora olmaydi");
+    }
+
+    return recipient;
+  }
+
   private toOfferResponse(offer: StoreOfferEntity) {
+    const materialSubtotalUzs = offer.materialSubtotalUzs || offer.totalAmountUzs;
+    const deliveryFeeUzs = offer.deliveryFeeUzs || 0;
+    const finalTotalUzs = materialSubtotalUzs + deliveryFeeUzs;
+
     return {
+      completeListAvailable: offer.completeListAvailable ?? true,
       createdAt: offer.createdAt,
+      deliveryEstimate: offer.deliveryEstimate,
+      deliveryFeeUzs,
       deliveryIncluded: offer.deliveryIncluded,
+      finalTotalUzs,
       id: offer.id,
+      materialSubtotalUzs,
       note: offer.note,
       status: offer.status,
       store: offer.store,
-      totalAmountUzs: offer.totalAmountUzs,
+      totalAmountUzs: finalTotalUzs,
       validityHours: offer.validityHours
     };
   }

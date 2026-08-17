@@ -8,7 +8,17 @@ export class AuditController {
 
   @Get()
   @RequirePermissions("audit.read")
-  findLatest(@Query("limit") limit?: string) {
-    return this.auditService.findLatest(limit ? Number(limit) : 100);
+  findLatest(
+    @Query("limit") limit?: string,
+    @Query("action") action?: string,
+    @Query("actorRole") actorRole?: string,
+    @Query("entityType") entityType?: string
+  ) {
+    return this.auditService.findLatest({
+      action,
+      actorRole,
+      entityType,
+      limit: limit ? Number(limit) : 100
+    });
   }
 }

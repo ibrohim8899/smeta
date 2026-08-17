@@ -18,4 +18,9 @@ export class CreateDealerDto {
   @IsString()
   @MaxLength(120)
   companyName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  telegramUserId?: string;
 }

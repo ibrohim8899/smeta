@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { BellRing, Send } from "lucide-react";
 import { StatusPill } from "../../components/ui/StatusPill";
-import { createNotification, fetchNotifications, updateNotificationStatus, type NotificationResponse } from "../../lib/api";
+import { createNotification, fetchNotifications, retryNotification, updateNotificationStatus, type NotificationResponse } from "../../lib/api";
 
 const statusOptions = [
   { label: "Hammasi", value: "" },
   { label: "Kutilmoqda", value: "pending" },
   { label: "Yuborildi", value: "sent" },
+  { label: "Processing", value: "processing" },
   { label: "Xato", value: "failed" },
+  { label: "Dead letter", value: "dead_letter" },
   { label: "O'tkazildi", value: "skipped" }
 ];
 
@@ -63,6 +65,11 @@ export function NotificationsView() {
     await loadNotifications();
   }
 
+  async function handleRetry(id: string) {
+    await retryNotification(id);
+    await loadNotifications();
+  }
+
   useEffect(() => {
     void loadNotifications(statusFilter);
   }, [statusFilter]);
@@ -71,6 +78,7 @@ export function NotificationsView() {
     () => ({
       failed: notifications.filter((notification) => notification.status === "failed").length,
       pending: notifications.filter((notification) => notification.status === "pending").length,
+      processing: notifications.filter((notification) => notification.status === "processing").length,
       sent: notifications.filter((notification) => notification.status === "sent").length,
       total: notifications.length
     }),
@@ -103,6 +111,7 @@ export function NotificationsView() {
         <div className="mt-5 grid gap-3 sm:grid-cols-4">
           <Metric label="Jami" value={counts.total} />
           <Metric label="Kutilmoqda" value={counts.pending} />
+          <Metric label="Processing" value={counts.processing} />
           <Metric label="Yuborildi" value={counts.sent} />
           <Metric label="Xato" value={counts.failed} />
         </div>
@@ -154,6 +163,7 @@ export function NotificationsView() {
                     {notification.attempts > 0 ? ` · urinish: ${notification.attempts}` : ""}
                   </p>
                   {notification.lastError ? <p className="mt-2 text-sm text-red-700">Xato: {notification.lastError}</p> : null}
+                  {notification.scheduledAt ? <p className="mt-2 text-xs text-smeta-mauve">Keyingi urinish: {new Date(notification.scheduledAt).toLocaleString("uz-UZ")}</p> : null}
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2">
                   <button className="rounded-md bg-smeta-deep px-3 py-2 text-xs font-semibold text-white" onClick={() => void handleStatusChange(notification.id, "sent")}>
@@ -170,6 +180,13 @@ export function NotificationsView() {
                     onClick={() => void handleStatusChange(notification.id, "skipped")}
                   >
                     O'tkazish
+                  </button>
+                  <button
+                    className="rounded-md border border-smeta-line px-3 py-2 text-xs font-semibold text-smeta-ink disabled:opacity-50"
+                    disabled={notification.status === "sent"}
+                    onClick={() => void handleRetry(notification.id)}
+                  >
+                    Retry
                   </button>
                 </div>
               </div>

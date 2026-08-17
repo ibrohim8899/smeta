@@ -18,8 +18,20 @@ export class StoreOfferEntity {
   })
   store!: StoreEntity;
 
+  @Column({ default: 0, name: "material_subtotal_uzs", type: "integer" })
+  materialSubtotalUzs!: number;
+
+  @Column({ default: 0, name: "delivery_fee_uzs", type: "integer" })
+  deliveryFeeUzs!: number;
+
   @Column({ name: "total_amount_uzs", type: "integer" })
   totalAmountUzs!: number;
+
+  @Column({ default: true, name: "complete_list_available" })
+  completeListAvailable!: boolean;
+
+  @Column({ name: "delivery_estimate", nullable: true, type: "varchar" })
+  deliveryEstimate!: string | null;
 
   @Column({ default: false, name: "delivery_included" })
   deliveryIncluded!: boolean;

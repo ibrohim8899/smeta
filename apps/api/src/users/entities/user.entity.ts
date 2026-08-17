@@ -5,17 +5,20 @@ export class UserEntity {
   @PrimaryGeneratedColumn("uuid")
   id!: string;
 
-  @Column({ unique: true })
-  email!: string;
+  @Column({ nullable: true, type: "varchar", unique: true })
+  email!: string | null;
 
-  @Column({ name: "password_hash" })
-  passwordHash!: string;
+  @Column({ name: "password_hash", nullable: true, type: "varchar" })
+  passwordHash!: string | null;
 
   @Column({ name: "display_name" })
   displayName!: string;
 
   @Column({ default: "superadmin" })
   role!: string;
+
+  @Column({ default: "superadmin", type: "simple-array" })
+  roles!: string[];
 
   @Column({ default: "active" })
   status!: string;

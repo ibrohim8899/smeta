@@ -7,5 +7,6 @@ export type ViewKey =
   | "orders"
   | "dealer"
   | "finance"
+  | "reports"
   | "security"
   | "notifications";

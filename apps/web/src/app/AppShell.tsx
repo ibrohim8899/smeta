@@ -1,18 +1,24 @@
 import { useEffect, useState } from "react";
-import { Bell, Moon, Sun } from "lucide-react";
-import { APP_TIMEZONE } from "@smeta/shared";
+import { Bell, LogOut, Moon, Sun } from "lucide-react";
+import { APP_TIMEZONE, ROLE_LABELS, type UserRole } from "@smeta/shared";
 import { IconButton } from "../components/ui/IconButton";
 import { SearchBox } from "../components/ui/SearchBox";
 import { navigationItems } from "./navigation";
+import type { AuthSessionResponse } from "../lib/api";
 import type { ViewKey } from "../types/navigation";
 
 type AppShellProps = {
   activeView: ViewKey;
   children: React.ReactNode;
+  session: AuthSessionResponse;
+  onLogout: () => void;
+  onRoleSwitch: (role: UserRole) => void;
+  onSearchChange: (query: string) => void;
   onViewChange: (view: ViewKey) => void;
+  searchQuery: string;
 };
 
-export function AppShell({ activeView, children, onViewChange }: AppShellProps) {
+export function AppShell({ activeView, children, session, onLogout, onRoleSwitch, onSearchChange, onViewChange, searchQuery }: AppShellProps) {
   const [theme, setTheme] = useState<"light" | "dark">("light");
 
   useEffect(() => {
@@ -29,6 +35,8 @@ export function AppShell({ activeView, children, onViewChange }: AppShellProps) 
   }, [theme]);
 
   const nextTheme = theme === "dark" ? "light" : "dark";
+  const visibleNavigation = navigationItems.filter((item) => (item.roles as readonly UserRole[]).includes(session.role as UserRole));
+  const displayName = compactAccountName(session.displayName);
 
   return (
     <main className="min-h-screen bg-smeta-paper text-smeta-ink" data-theme={theme}>
@@ -46,7 +54,7 @@ export function AppShell({ activeView, children, onViewChange }: AppShellProps) 
           </div>
 
           <nav className="mt-5 flex gap-2 overflow-x-auto lg:flex-col lg:overflow-visible">
-            {navigationItems.map(({ key, label, icon: Icon }) => {
+            {visibleNavigation.map(({ key, label, icon: Icon }) => {
               const active = activeView === key;
               return (
                 <button
@@ -71,12 +79,36 @@ export function AppShell({ activeView, children, onViewChange }: AppShellProps) 
               <h2 className="mt-1 text-2xl font-semibold">Material so'rovidan to'lovgacha</h2>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <SearchBox />
+              <SearchBox value={searchQuery} onChange={onSearchChange} />
+              <div className="flex items-center gap-2 rounded-md border border-smeta-line bg-white px-3 py-2 text-sm">
+                <div>
+                  <p className="max-w-24 text-xs font-semibold text-smeta-mauve" title={session.displayName}>
+                    {displayName}
+                  </p>
+                  <p className="font-semibold">{session.roleLabel}</p>
+                </div>
+                {session.approvedRoles.length > 1 ? (
+                  <select
+                    className="rounded-md border border-smeta-line bg-white px-2 py-1 text-xs outline-none focus:border-smeta-clay"
+                    value={session.role}
+                    onChange={(event) => onRoleSwitch(event.target.value as UserRole)}
+                  >
+                    {session.approvedRoles.map((role) => (
+                      <option key={role} value={role}>
+                        {ROLE_LABELS[role as UserRole] ?? role}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+              </div>
               <IconButton label={theme === "dark" ? "Light mode" : "Dark mode"} onClick={() => setTheme(nextTheme)}>
                 {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
               </IconButton>
               <IconButton label="Bildirishnomalar" onClick={() => onViewChange("notifications")}>
                 <Bell className="h-4 w-4" />
+              </IconButton>
+              <IconButton label="Chiqish" onClick={onLogout}>
+                <LogOut className="h-4 w-4" />
               </IconButton>
             </div>
           </header>
@@ -86,4 +118,15 @@ export function AppShell({ activeView, children, onViewChange }: AppShellProps) 
       </div>
     </main>
   );
+}
+
+function compactAccountName(name: string, maxLength = 9) {
+  const trimmed = name.trim();
+  const characters = Array.from(trimmed);
+
+  if (characters.length <= maxLength) {
+    return trimmed;
+  }
+
+  return `${characters.slice(0, maxLength).join("")}...`;
 }

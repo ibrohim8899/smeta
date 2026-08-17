@@ -7,8 +7,23 @@ export class CreateStoreDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(120)
+  ownerName?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(32)
   phone?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(240)
+  address?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  telegramUserId?: string;
 
   @IsArray()
   @ArrayMaxSize(20)

@@ -4,10 +4,32 @@ export class CreateStoreOfferDto {
   @IsString()
   storeId!: string;
 
+  @IsOptional()
   @IsInt()
   @Min(1)
   @Max(2_000_000_000)
-  totalAmountUzs!: number;
+  materialSubtotalUzs?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(2_000_000_000)
+  deliveryFeeUzs?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(2_000_000_000)
+  totalAmountUzs?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  completeListAvailable?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  deliveryEstimate?: string;
 
   @IsOptional()
   @IsBoolean()

@@ -28,4 +28,8 @@ export class CreateNotificationDto {
   @IsObject()
   @IsOptional()
   metadata?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsString()
+  scheduledAt?: string;
 }

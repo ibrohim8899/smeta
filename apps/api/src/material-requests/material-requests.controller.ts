@@ -18,11 +18,14 @@ import { basename, resolve } from "node:path";
 import { diskStorage } from "multer";
 import type { Response } from "express";
 import { RequirePermissions } from "../auth/require-permissions.decorator";
+import { CustomerCancelDto, CustomerDisputeDto, GuestConfirmDeliveryDto, UpdateGuestContactDto } from "./dto/customer-action.dto";
 import { CreateMaterialRequestDto } from "./dto/create-material-request.dto";
+import { ResolveRequestDisputeDto } from "./dto/resolve-request-dispute.dto";
 import {
   getSafeOriginalFileName,
   getUploadDirectory,
   getUploadExtension,
+  isDownloadAllowed,
   isAllowedUpload,
   MAX_REQUEST_FILES,
   MAX_REQUEST_FILE_SIZE_BYTES
@@ -37,13 +40,11 @@ export class MaterialRequestsController {
   constructor(private readonly materialRequestsService: MaterialRequestsService) {}
 
   @Post()
-  @RequirePermissions("requests.create")
   create(@Body() dto: CreateMaterialRequestDto) {
     return this.materialRequestsService.create(dto);
   }
 
   @Post("with-files")
-  @RequirePermissions("requests.create")
   @UseInterceptors(
     FilesInterceptor("attachments", MAX_REQUEST_FILES, {
       fileFilter: (_request, file, callback) => {
@@ -67,7 +68,9 @@ export class MaterialRequestsController {
         },
         filename: (_request, file, callback) => {
           const extension = getUploadExtension(file.originalname);
-          callback(null, `${randomUUID()}${extension}`);
+          const safeName = getSafeOriginalFileName(file.originalname);
+          const safeBaseName = safeName.toLowerCase().endsWith(extension) ? safeName.slice(0, -extension.length).slice(0, 80) : safeName.slice(0, 80);
+          callback(null, `${randomUUID()}-${safeBaseName}${extension}`);
         }
       })
     })
@@ -84,12 +87,69 @@ export class MaterialRequestsController {
         dealerReferral: body.dealerReferral || undefined,
         dealerReferralCode: body.dealerReferralCode || undefined,
         description: body.description || undefined,
+        deliveryNote: body.deliveryNote || undefined,
         phone: body.phone || undefined,
         region: body.region,
         source: (body.source as CreateMaterialRequestDto["source"]) || "guest_link"
       },
       files ?? []
     );
+  }
+
+  @Get("guest/:token")
+  findByGuestToken(@Param("token") token: string) {
+    return this.materialRequestsService.findByGuestToken(token);
+  }
+
+  @Patch("guest/:token/contact")
+  updateGuestContact(@Param("token") token: string, @Body() dto: UpdateGuestContactDto) {
+    return this.materialRequestsService.updateGuestContact(token, dto);
+  }
+
+  @Get("guest/:token/offers")
+  findGuestOffers(@Param("token") token: string) {
+    return this.materialRequestsService.findGuestOffers(token);
+  }
+
+  @Post("guest/:token/select-offer/:offerId")
+  selectGuestOffer(@Param("token") token: string, @Param("offerId") offerId: string) {
+    return this.materialRequestsService.selectGuestOffer(token, offerId);
+  }
+
+  @Get("guest/:token/order")
+  findGuestOrder(@Param("token") token: string) {
+    return this.materialRequestsService.findGuestOrder(token);
+  }
+
+  @Post("guest/:token/cancel")
+  cancelByGuest(@Param("token") token: string, @Body() dto: CustomerCancelDto) {
+    return this.materialRequestsService.cancelByGuest(token, dto);
+  }
+
+  @Post("guest/:token/dispute")
+  disputeByGuest(@Param("token") token: string, @Body() dto: CustomerDisputeDto) {
+    return this.materialRequestsService.disputeByGuest(token, dto);
+  }
+
+  @Post("guest/:token/orders/:orderId/confirm-delivery")
+  confirmGuestDelivery(@Param("token") token: string, @Param("orderId") orderId: string, @Body() dto: GuestConfirmDeliveryDto) {
+    return this.materialRequestsService.confirmGuestDelivery(token, orderId, dto);
+  }
+
+  @Post("guest/:token/rotate")
+  rotateGuestToken(@Param("token") token: string) {
+    return this.materialRequestsService.rotateGuestToken(token);
+  }
+
+  @Post("guest/:token/revoke")
+  revokeGuestToken(@Param("token") token: string) {
+    return this.materialRequestsService.revokeGuestToken(token);
+  }
+
+  @Get("guest/:token/attachments/:attachmentId/download")
+  async downloadGuestAttachment(@Param("token") token: string, @Param("attachmentId") attachmentId: string, @Res() response: Response) {
+    const attachment = await this.materialRequestsService.getGuestAttachmentForDownload(token, attachmentId);
+    return this.streamAttachment(attachment, response);
   }
 
   @Get()
@@ -102,6 +162,12 @@ export class MaterialRequestsController {
   @RequirePermissions("requests.moderate")
   updateStatus(@Param("id") id: string, @Body() dto: UpdateMaterialRequestStatusDto) {
     return this.materialRequestsService.updateStatus(id, dto);
+  }
+
+  @Post(":id/resolve-dispute")
+  @RequirePermissions("requests.moderate")
+  resolveDispute(@Param("id") id: string, @Body() dto: ResolveRequestDisputeDto) {
+    return this.materialRequestsService.resolveDispute(id, dto);
   }
 
   @Delete(":id")
@@ -120,6 +186,10 @@ export class MaterialRequestsController {
   @RequirePermissions("requests.read")
   async downloadAttachment(@Param("requestId") requestId: string, @Param("attachmentId") attachmentId: string, @Res() response: Response) {
     const attachment = await this.materialRequestsService.getAttachmentForDownload(requestId, attachmentId);
+    return this.streamAttachment(attachment, response);
+  }
+
+  private streamAttachment(attachment: { fileName: string; mimeType: string; scanStatus: string; storageKey: string }, response: Response) {
     const baseUploadPath = resolve(uploadDir);
     const filePath = resolve(baseUploadPath, basename(attachment.storageKey));
 
@@ -129,6 +199,10 @@ export class MaterialRequestsController {
 
     if (!existsSync(filePath)) {
       throw new BadRequestException("Fayl storage ichida topilmadi");
+    }
+
+    if (!isDownloadAllowed(attachment.scanStatus)) {
+      throw new BadRequestException("Fayl xavfsizlik tekshiruvidan o'tmagan");
     }
 
     response.setHeader("Content-Type", attachment.mimeType);

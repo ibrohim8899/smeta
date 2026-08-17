@@ -34,11 +34,29 @@ export class AuditService {
     return this.auditRepository.save(log);
   }
 
-  async findLatest(limit = 100) {
-    const take = Math.min(Math.max(limit, 1), 200);
+  async findLatest(input: number | { action?: string; actorRole?: string; entityType?: string; limit?: number } = 100) {
+    const filters = typeof input === "number" ? { limit: input } : input;
+    const take = Math.min(Math.max(filters.limit ?? 100, 1), 200);
     const logs = await this.auditRepository.find({
       order: {
         createdAt: "DESC"
+      },
+      where: {
+        ...(filters.action
+          ? {
+              action: filters.action
+            }
+          : {}),
+        ...(filters.actorRole
+          ? {
+              actorRole: filters.actorRole
+            }
+          : {}),
+        ...(filters.entityType
+          ? {
+              entityType: filters.entityType
+            }
+          : {})
       },
       take
     });

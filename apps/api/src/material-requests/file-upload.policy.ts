@@ -1,4 +1,4 @@
-import { extname } from "node:path";
+import { extname, resolve } from "node:path";
 
 export const MAX_REQUEST_FILES = 10;
 export const MAX_REQUEST_FILE_SIZE_BYTES = 20 * 1024 * 1024;
@@ -13,15 +13,19 @@ export const allowedUploadMimeTypes = {
 } as const;
 
 export function getUploadDirectory() {
-  return process.env.LOCAL_UPLOAD_DIR ?? "../../storage/uploads/material-requests";
+  return resolve(process.env.LOCAL_UPLOAD_DIR ?? "../../storage/uploads/material-requests");
 }
 
 export function getSafeOriginalFileName(fileName: string) {
-  return fileName.replace(/[^\p{L}\p{N}._ -]/gu, "_").slice(0, 180) || "fayl";
+  return fileName.replace(/[^\p{L}\p{N}._ -]/gu, "_").replace(/^\.+/, "").slice(0, 180) || "fayl";
 }
 
 export function getUploadExtension(fileName: string) {
   return extname(fileName).toLowerCase();
+}
+
+export function isDownloadAllowed(scanStatus: string) {
+  return !["infected", "blocked", "failed"].includes(scanStatus);
 }
 
 export function isAllowedUpload(mimeType: string, fileName: string) {

@@ -6,7 +6,8 @@ export function databaseConfig(): TypeOrmModuleOptions {
     url: process.env.DATABASE_URL,
     autoLoadEntities: true,
     synchronize: process.env.NODE_ENV === "development" && process.env.TYPEORM_SYNCHRONIZE === "true",
-    migrationsRun: false,
+    migrations: [`${__dirname}/../migrations/*{.ts,.js}`],
+    migrationsRun: process.env.TYPEORM_MIGRATIONS_RUN === "true",
     logging: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"]
   };
 }
