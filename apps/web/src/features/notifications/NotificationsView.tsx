@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
-import { BellRing, Send } from "lucide-react";
+import { BellRing } from "lucide-react";
 import { StatusPill } from "../../components/ui/StatusPill";
-import { createNotification, fetchNotifications, retryNotification, updateNotificationStatus, type NotificationResponse } from "../../lib/api";
+import { fetchNotifications, type NotificationResponse } from "../../lib/api";
+import { formatStatusLabel } from "../../lib/labels";
+import { matchesSearch } from "../../lib/search";
 
 const statusOptions = [
   { label: "Hammasi", value: "" },
   { label: "Kutilmoqda", value: "pending" },
   { label: "Yuborildi", value: "sent" },
-  { label: "Processing", value: "processing" },
+  { label: "Jarayonda", value: "processing" },
   { label: "Xato", value: "failed" },
-  { label: "Dead letter", value: "dead_letter" },
-  { label: "O'tkazildi", value: "skipped" }
+  { label: "Yuborib bo'lmadi", value: "dead_letter" },
+  { label: "O'tkazilgan", value: "skipped" }
 ];
 
 const roleLabels: Record<string, string> = {
@@ -27,7 +29,11 @@ const channelLabels: Record<string, string> = {
   web: "Web"
 };
 
-export function NotificationsView() {
+type NotificationsViewProps = {
+  searchQuery?: string;
+};
+
+export function NotificationsView({ searchQuery = "" }: NotificationsViewProps) {
   const [notifications, setNotifications] = useState<NotificationResponse[]>([]);
   const [statusFilter, setStatusFilter] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -46,30 +52,6 @@ export function NotificationsView() {
     }
   }
 
-  async function handleCreateTestNotification() {
-    await createNotification({
-      bodyUz: "Bu test bildirishnoma. Telegram token ulanganda shu outboxdan real xabar yuboriladi.",
-      channel: "web",
-      eventType: "notification.test",
-      metadata: {
-        source: "web_preview"
-      },
-      recipientRole: "admin",
-      titleUz: "Test bildirishnoma"
-    });
-    await loadNotifications();
-  }
-
-  async function handleStatusChange(id: string, status: string) {
-    await updateNotificationStatus(id, status, status === "failed" ? "Manual test xatosi" : undefined);
-    await loadNotifications();
-  }
-
-  async function handleRetry(id: string) {
-    await retryNotification(id);
-    await loadNotifications();
-  }
-
   useEffect(() => {
     void loadNotifications(statusFilter);
   }, [statusFilter]);
@@ -84,34 +66,48 @@ export function NotificationsView() {
     }),
     [notifications]
   );
+  const filteredNotifications = useMemo(
+    () =>
+      notifications.filter((notification) =>
+        matchesSearch(searchQuery, [
+          notification.titleUz,
+          notification.bodyUz,
+          notification.eventType,
+          notification.status,
+          formatStatusLabel(notification.status),
+          notification.channel,
+          channelLabels[notification.channel],
+          notification.recipientRole,
+          roleLabels[notification.recipientRole],
+          notification.recipientRef,
+          notification.lastError,
+          notification.metadata
+        ])
+      ),
+    [notifications, searchQuery]
+  );
 
   return (
     <div className="space-y-5">
       <section className="rounded-lg border border-smeta-line bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-start gap-3">
-            <div className="rounded-md bg-smeta-soft p-2 text-smeta-clay">
-              <BellRing className="h-5 w-5" />
-            </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-smeta-mauve">Notification outbox</p>
-              <h3 className="mt-1 text-xl font-semibold">Bildirishnomalar navbati</h3>
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-smeta-mauve">
-                Hozir bildirishnomalar tizim ichida navbatga yoziladi. Telegram bot token ulanganda pending yozuvlar shu yerdan real
-                yuboriladi va statusi avtomatik yangilanadi.
-              </p>
-            </div>
+        <div className="flex items-start gap-3">
+          <div className="rounded-md bg-smeta-soft p-2 text-smeta-clay">
+            <BellRing className="h-5 w-5" />
           </div>
-          <button className="inline-flex items-center gap-2 rounded-md bg-smeta-deep px-4 py-2 text-sm font-semibold text-white" onClick={handleCreateTestNotification}>
-            <Send className="h-4 w-4" />
-            Test yaratish
-          </button>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-smeta-mauve">Bildirishnoma navbati</p>
+            <h3 className="mt-1 text-xl font-semibold">Bildirishnomalar navbati</h3>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-smeta-mauve">
+              Bildirishnomalar ariza, taklif, buyurtma va moliya amallaridan avtomatik navbatga yoziladi. Telegram bot token ulanganda
+              pending yozuvlar shu yerdan real yuboriladi va statusi yangilanadi.
+            </p>
+          </div>
         </div>
 
         <div className="mt-5 grid gap-3 sm:grid-cols-4">
           <Metric label="Jami" value={counts.total} />
           <Metric label="Kutilmoqda" value={counts.pending} />
-          <Metric label="Processing" value={counts.processing} />
+          <Metric label="Jarayonda" value={counts.processing} />
           <Metric label="Yuborildi" value={counts.sent} />
           <Metric label="Xato" value={counts.failed} />
         </div>
@@ -142,10 +138,12 @@ export function NotificationsView() {
         {loading ? <p className="mt-4 text-sm text-smeta-mauve">Yuklanmoqda...</p> : null}
 
         <div className="mt-5 space-y-3">
-          {!loading && notifications.length === 0 ? <p className="text-sm text-smeta-mauve">Hali bildirishnoma yo'q.</p> : null}
-          {notifications.map((notification) => (
+          {!loading && filteredNotifications.length === 0 ? (
+            <p className="text-sm text-smeta-mauve">{searchQuery.trim() ? "Qidiruv bo'yicha bildirishnoma topilmadi." : "Hali bildirishnoma yo'q."}</p>
+          ) : null}
+          {filteredNotifications.map((notification) => (
             <article key={notification.id} className="rounded-md border border-smeta-line bg-smeta-paper p-4">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <StatusPill label={notification.status} />
@@ -163,31 +161,8 @@ export function NotificationsView() {
                     {notification.attempts > 0 ? ` · urinish: ${notification.attempts}` : ""}
                   </p>
                   {notification.lastError ? <p className="mt-2 text-sm text-red-700">Xato: {notification.lastError}</p> : null}
+                  {notification.sentAt ? <p className="mt-2 text-xs text-smeta-mauve">Yuborilgan vaqt: {new Date(notification.sentAt).toLocaleString("uz-UZ")}</p> : null}
                   {notification.scheduledAt ? <p className="mt-2 text-xs text-smeta-mauve">Keyingi urinish: {new Date(notification.scheduledAt).toLocaleString("uz-UZ")}</p> : null}
-                </div>
-                <div className="flex shrink-0 flex-wrap gap-2">
-                  <button className="rounded-md bg-smeta-deep px-3 py-2 text-xs font-semibold text-white" onClick={() => void handleStatusChange(notification.id, "sent")}>
-                    Yuborildi
-                  </button>
-                  <button
-                    className="rounded-md border border-smeta-line px-3 py-2 text-xs font-semibold text-smeta-ink"
-                    onClick={() => void handleStatusChange(notification.id, "failed")}
-                  >
-                    Xato
-                  </button>
-                  <button
-                    className="rounded-md border border-smeta-line px-3 py-2 text-xs font-semibold text-smeta-ink"
-                    onClick={() => void handleStatusChange(notification.id, "skipped")}
-                  >
-                    O'tkazish
-                  </button>
-                  <button
-                    className="rounded-md border border-smeta-line px-3 py-2 text-xs font-semibold text-smeta-ink disabled:opacity-50"
-                    disabled={notification.status === "sent"}
-                    onClick={() => void handleRetry(notification.id)}
-                  >
-                    Retry
-                  </button>
                 </div>
               </div>
             </article>

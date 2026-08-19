@@ -9,6 +9,7 @@ import {
   type AuthSessionResponse,
   type BrowserLoginResponse
 } from "../../lib/api";
+import { formatStatusLabel } from "../../lib/labels";
 
 const PENDING_BROWSER_LOGIN_KEY = "smeta-pending-browser-login";
 
@@ -139,13 +140,10 @@ export function LoginView({ onAuthenticated, onGuestRequest }: LoginViewProps) {
             Dealer, do'kon, admin va moliya rollari Telegram orqali tasdiqlanadi. Mijoz esa ro'yxatdan o'tmasdan material so'rovi yuborishi mumkin.
           </p>
 
-          <div className="mt-6 grid gap-3 sm:grid-cols-2">
-            <button className="rounded-md bg-smeta-deep px-4 py-3 text-left text-sm font-semibold text-white" onClick={onGuestRequest}>
+          <div className="mt-6">
+            <button className="w-full rounded-md bg-smeta-deep px-4 py-3 text-left text-sm font-semibold text-white sm:w-auto sm:min-w-64" onClick={onGuestRequest}>
               Mijoz so'rovi yuborish
             </button>
-            <a className="rounded-md border border-smeta-line bg-white px-4 py-3 text-sm font-semibold text-smeta-ink" href="/openapi.json">
-              API contract
-            </a>
           </div>
         </div>
 
@@ -183,7 +181,7 @@ export function LoginView({ onAuthenticated, onGuestRequest }: LoginViewProps) {
 
           {login ? (
             <div className="mt-4 rounded-md border border-smeta-line bg-smeta-paper p-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.13em] text-smeta-mauve">Status: {status}</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.13em] text-smeta-mauve">Holat: {formatStatusLabel(status)}</p>
               <p className="mt-2 text-sm text-smeta-mauve">Telegram botdagi tasdiqlash xabaridan platformaga qayting.</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <button className="flex items-center gap-2 rounded-md border border-smeta-line bg-white px-3 py-2 text-sm font-bold" onClick={() => openTelegramLogin()}>

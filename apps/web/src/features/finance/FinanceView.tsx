@@ -19,8 +19,14 @@ import {
   type FinanceSummaryResponse,
   type StoreStatementResponse
 } from "../../lib/api";
+import { formatStatusLabel } from "../../lib/labels";
+import { matchesSearch } from "../../lib/search";
 
-export function FinanceView() {
+type FinanceViewProps = {
+  searchQuery?: string;
+};
+
+export function FinanceView({ searchQuery = "" }: FinanceViewProps) {
   const [ledger, setLedger] = useState<FinanceLedgerResponse[]>([]);
   const [payouts, setPayouts] = useState<FinancePayoutResponse[]>([]);
   const [summary, setSummary] = useState<FinanceSummaryResponse | null>(null);
@@ -37,9 +43,37 @@ export function FinanceView() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const filteredLedger = useMemo(
+    () =>
+      ledger.filter((entry) =>
+        matchesSearch(searchQuery, [
+          entry.publicCode,
+          entry.order.publicCode,
+          entry.store.name,
+          entry.dealerReferral,
+          entry.status,
+          formatStatusLabel(entry.status),
+          entry.agingBucket,
+          agingLabel(entry.agingBucket),
+          entry.baseAmountUzs,
+          entry.storeDebtUzs,
+          entry.remainingDebtUzs,
+          entry.paidAmountUzs,
+          entry.dealerRewardUzs
+        ])
+      ),
+    [ledger, searchQuery]
+  );
+  const filteredPayouts = useMemo(
+    () =>
+      payouts.filter((payout) =>
+        matchesSearch(searchQuery, [payout.publicCode, payout.dealerName, payout.dealerId, payout.amountUzs, payout.status, formatStatusLabel(payout.status), payout.reference])
+      ),
+    [payouts, searchQuery]
+  );
   const selectedLedger = useMemo(
-    () => ledger.find((entry) => entry.id === selectedLedgerId) ?? ledger.find((entry) => entry.status !== "paid") ?? ledger[0] ?? null,
-    [ledger, selectedLedgerId]
+    () => filteredLedger.find((entry) => entry.id === selectedLedgerId) ?? filteredLedger.find((entry) => entry.status !== "paid") ?? filteredLedger[0] ?? null,
+    [filteredLedger, selectedLedgerId]
   );
   const selectedDealerId = selectedLedger?.dealerId ?? "";
   const remainingDebt = selectedLedger ? selectedLedger.remainingDebtUzs : 0;
@@ -69,12 +103,16 @@ export function FinanceView() {
   }, []);
 
   useEffect(() => {
-    if (selectedLedger) {
-      setPaymentAmount(String(Math.max(selectedLedger.remainingDebtUzs, 0)));
-      setAdjustmentAmount("");
-      setAdjustmentReason("");
-      void loadStatements(selectedLedger);
+    if (!selectedLedger) {
+      setDealerStatement(null);
+      setStoreStatement(null);
+      return;
     }
+
+    setPaymentAmount(String(Math.max(selectedLedger.remainingDebtUzs, 0)));
+    setAdjustmentAmount("");
+    setAdjustmentReason("");
+    void loadStatements(selectedLedger);
   }, [selectedLedger?.id]);
 
   async function loadStatements(entry: FinanceLedgerResponse) {
@@ -140,14 +178,14 @@ export function FinanceView() {
                 </tr>
               </thead>
               <tbody>
-                {ledger.length === 0 ? (
+                {filteredLedger.length === 0 ? (
                   <tr>
                     <td className="border-b border-smeta-line px-3 py-6 text-smeta-mauve" colSpan={9}>
-                      Hali moliya yozuvi yo'q.
+                      {searchQuery.trim() ? "Qidiruv bo'yicha moliya yozuvi topilmadi." : "Hali moliya yozuvi yo'q."}
                     </td>
                   </tr>
                 ) : (
-                  ledger.map((entry) => (
+                  filteredLedger.map((entry) => (
                     <tr key={entry.id} className={selectedLedgerId === entry.id ? "bg-smeta-soft" : undefined}>
                       <td className="border-b border-smeta-line px-3 py-4">
                         <button className="text-left font-bold text-smeta-clay" onClick={() => setSelectedLedgerId(entry.id)}>
@@ -251,7 +289,7 @@ export function FinanceView() {
           )}
 
           <div className="mt-4 space-y-2">
-            {payouts.slice(0, 6).map((payout) => (
+            {filteredPayouts.slice(0, 6).map((payout) => (
               <div key={payout.id} className="rounded-md border border-smeta-line px-3 py-2">
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-sm font-bold">{payout.publicCode}</p>

@@ -69,7 +69,7 @@ export class FinanceService {
 
     const storeCommissionRate = Number(process.env.DEFAULT_STORE_COMMISSION_RATE ?? DEFAULT_STORE_COMMISSION_RATE);
     const dealerRewardRate = Number(process.env.DEFAULT_DEALER_REWARD_RATE ?? DEFAULT_DEALER_REWARD_RATE);
-    const baseAmountUzs = order.selectedOffer.materialSubtotalUzs || order.acceptedAmountUzs;
+    const baseAmountUzs = order.finalAmountUzs || order.acceptedAmountUzs;
     const platformCommissionUzs = Math.round(baseAmountUzs * storeCommissionRate);
     const dealerRewardUzs = order.request.dealerReferral ? Math.round(baseAmountUzs * dealerRewardRate) : 0;
     const platformNetUzs = platformCommissionUzs - dealerRewardUzs;

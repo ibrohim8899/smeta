@@ -5,6 +5,7 @@ import { In, Repository } from "typeorm";
 import { AuditService } from "../audit/audit.service";
 import { RequestRecipientEntity } from "../offers/entities/request-recipient.entity";
 import { StoreOfferEntity } from "../offers/entities/store-offer.entity";
+import { UsersService } from "../users/users.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { CreateStoreDto } from "./dto/create-store.dto";
 import { UpdateStoreProfileDto } from "./dto/update-store-profile.dto";
@@ -21,7 +22,8 @@ export class StoresService {
     @InjectRepository(StoreOfferEntity)
     private readonly offersRepository: Repository<StoreOfferEntity>,
     private readonly auditService: AuditService,
-    private readonly notificationsService: NotificationsService
+    private readonly notificationsService: NotificationsService,
+    private readonly usersService: UsersService
   ) {}
 
   async create(dto: CreateStoreDto) {
@@ -41,6 +43,12 @@ export class StoresService {
     });
 
     const saved = await this.storesRepository.save(store);
+
+    if (saved.status === "approved" && saved.active) {
+      await this.usersService.addRoleByTelegramUserId(saved.telegramUserId, "store");
+    } else {
+      await this.usersService.removeRoleByTelegramUserId(saved.telegramUserId, "store");
+    }
 
     await this.auditService.record({
       action: "store.created",
@@ -151,6 +159,12 @@ export class StoresService {
     store.verifiedAt = dto.status === "approved" ? store.verifiedAt ?? new Date() : null;
 
     const saved = await this.storesRepository.save(store);
+
+    if (saved.status === "approved" && saved.active) {
+      await this.usersService.addRoleByTelegramUserId(saved.telegramUserId, "store");
+    } else {
+      await this.usersService.removeRoleByTelegramUserId(saved.telegramUserId, "store");
+    }
 
     await this.auditService.record({
       action: "store.status_updated",

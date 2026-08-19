@@ -1,6 +1,7 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
 const API_ROLE_HEADER = import.meta.env.VITE_SMETA_ROLE;
 const SESSION_STORAGE_KEY = "smeta-session-token";
+const SESSION_CLEARED_EVENT = "smeta-session-cleared";
 
 function authHeaders(headers?: Record<string, string>) {
   const sessionToken = getStoredSessionToken();
@@ -26,6 +27,45 @@ function jsonHeaders() {
   });
 }
 
+async function parseJsonOrNull<T>(response: Response): Promise<T | null> {
+  const body = await response.text();
+  return body.trim() ? (JSON.parse(body) as T) : null;
+}
+
+async function readApiErrorMessage(response: Response, fallback: string) {
+  const body = await response.text();
+
+  if (!body.trim()) {
+    return fallback;
+  }
+
+  try {
+    const parsed = JSON.parse(body) as { message?: unknown; error?: unknown };
+    const message = Array.isArray(parsed.message) ? parsed.message.join(", ") : parsed.message;
+    return typeof message === "string" && message.trim() ? message : fallback;
+  } catch {
+    return body;
+  }
+}
+
+async function readSessionAwareApiError(response: Response, fallback: string) {
+  const message = await readApiErrorMessage(response, fallback);
+
+  if (response.status === 401) {
+    clearSessionToken();
+
+    if (message.includes("Sessiya muddati tugagan")) {
+      return "Sessiya muddati tugagan. Iltimos, Telegram orqali qayta kiring.";
+    }
+
+    if (message.includes("Sessiya topilmadi")) {
+      return "Sessiya topilmadi. Iltimos, Telegram orqali qayta kiring.";
+    }
+  }
+
+  return message;
+}
+
 export function getStoredSessionToken() {
   if (typeof window === "undefined") {
     return null;
@@ -40,6 +80,11 @@ export function storeSessionToken(token: string) {
 
 export function clearSessionToken() {
   window.localStorage.removeItem(SESSION_STORAGE_KEY);
+  window.dispatchEvent(new Event(SESSION_CLEARED_EVENT));
+}
+
+export function sessionClearedEventName() {
+  return SESSION_CLEARED_EVENT;
 }
 
 export type AuthSessionResponse = {
@@ -87,6 +132,22 @@ export type PermissionMatrixResponse = Array<{
   role: string;
   roleLabel: string;
 }>;
+
+export type UserResponse = {
+  active: boolean;
+  createdAt: string;
+  displayName: string;
+  email: string | null;
+  id: string;
+  lastLoginAt: string | null;
+  role: string;
+  roles: string[];
+  status: string;
+  telegramLinked: boolean;
+  telegramUserId: string | null;
+  telegramUsername: string | null;
+  updatedAt: string;
+};
 
 export type AuditLogResponse = {
   action: string;
@@ -486,8 +547,7 @@ export async function createMaterialRequest(payload: CreateMaterialRequestPayloa
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "So'rov yuborishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "So'rov yuborishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<MaterialRequestResponse>;
@@ -500,7 +560,13 @@ export async function fetchAuthSession(role?: string): Promise<AuthSessionRespon
   });
 
   if (!response.ok) {
-    const message = await response.text();
+    const message = await readApiErrorMessage(response, "Rol ma'lumotini olishda xatolik bo'ldi");
+
+    if (response.status === 401 && message.includes("Sessiya topilmadi") && getStoredSessionToken()) {
+      clearSessionToken();
+      return fetchAuthSession(role);
+    }
+
     throw new Error(message || "Rol ma'lumotini olishda xatolik bo'ldi");
   }
 
@@ -513,11 +579,43 @@ export async function fetchPermissionMatrix(): Promise<PermissionMatrixResponse>
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Ruxsatlar ro'yxatini olishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Ruxsatlar ro'yxatini olishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<PermissionMatrixResponse>;
+}
+
+export async function fetchUsers(): Promise<UserResponse[]> {
+  const response = await fetch(`${API_BASE_URL}/users`, {
+    headers: authHeaders()
+  });
+
+  if (!response.ok) {
+    throw new Error(await readSessionAwareApiError(response, "Foydalanuvchilarni yuklab bo'lmadi"));
+  }
+
+  return response.json() as Promise<UserResponse[]>;
+}
+
+export async function updateUserAccess(
+  userId: string,
+  payload: {
+    active?: boolean;
+    roles?: string[];
+    status?: string;
+  }
+): Promise<UserResponse> {
+  const response = await fetch(`${API_BASE_URL}/users/${userId}/access`, {
+    body: JSON.stringify(payload),
+    headers: jsonHeaders(),
+    method: "PATCH"
+  });
+
+  if (!response.ok) {
+    throw new Error(await readSessionAwareApiError(response, "Foydalanuvchi rollari yangilanmadi"));
+  }
+
+  return response.json() as Promise<UserResponse>;
 }
 
 export async function exchangeTelegramInitData(payload: {
@@ -531,8 +629,7 @@ export async function exchangeTelegramInitData(payload: {
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Telegram sessiyasini yaratishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Telegram sessiyasini yaratishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<TelegramExchangeResponse>;
@@ -548,7 +645,7 @@ export async function createBrowserLogin(requestedRole?: string): Promise<Browse
   });
 
   if (!response.ok) {
-    const message = await response.text();
+    const message = await readApiErrorMessage(response, "Telegram login yaratishda xatolik bo'ldi");
     throw new Error(message || "Telegram login yaratishda xatolik bo'ldi");
   }
 
@@ -559,7 +656,7 @@ export async function pollBrowserLogin(nonce: string): Promise<BrowserLoginPollR
   const response = await fetch(`${API_BASE_URL}/auth/browser-login/${encodeURIComponent(nonce)}`);
 
   if (!response.ok) {
-    const message = await response.text();
+    const message = await readApiErrorMessage(response, "Telegram login holatini olishda xatolik bo'ldi");
     throw new Error(message || "Telegram login holatini olishda xatolik bo'ldi");
   }
 
@@ -572,7 +669,7 @@ export async function cancelBrowserLogin(nonce: string): Promise<{ status: strin
   });
 
   if (!response.ok) {
-    const message = await response.text();
+    const message = await readApiErrorMessage(response, "Telegram loginni bekor qilishda xatolik bo'ldi");
     throw new Error(message || "Telegram loginni bekor qilishda xatolik bo'ldi");
   }
 
@@ -586,8 +683,7 @@ export async function logoutCurrentSession(): Promise<{ revoked: boolean }> {
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Sessiyadan chiqishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Sessiyadan chiqishda xatolik bo'ldi"));
   }
 
   clearSessionToken();
@@ -604,8 +700,7 @@ export async function switchAuthRole(role: string): Promise<SwitchRoleResponse> 
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Rolni almashtirishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Rolni almashtirishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<SwitchRoleResponse>;
@@ -640,8 +735,7 @@ export async function fetchAuditLogs(
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Audit tarixini olishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Audit tarixini olishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<AuditLogResponse[]>;
@@ -653,8 +747,7 @@ export async function fetchV1ReportSummary(): Promise<V1ReportSummaryResponse> {
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Hisobotni olishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Hisobotni olishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<V1ReportSummaryResponse>;
@@ -666,8 +759,7 @@ export async function fetchV1Settings(): Promise<V1SettingsResponse> {
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Settings olishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Settings olishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<V1SettingsResponse>;
@@ -681,8 +773,7 @@ export async function updateV1Settings(payload: Partial<V1SettingsResponse>): Pr
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Settings saqlashda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Settings saqlashda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<V1SettingsResponse>;
@@ -702,8 +793,7 @@ export async function resolveMaterialRequestDispute(
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Request nizosini yopishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Request nizosini yopishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<MaterialRequestResponse>;
@@ -724,8 +814,7 @@ export async function resolveOrderDispute(
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Order nizosini yopishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Order nizosini yopishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<OrderResponse>;
@@ -741,8 +830,7 @@ export async function downloadV1ReportCsv(): Promise<string> {
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "CSV hisobotni olishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "CSV hisobotni olishda xatolik bo'ldi"));
   }
 
   return response.text();
@@ -762,7 +850,7 @@ export async function fetchNotifications(limit = 100, status?: string): Promise<
   });
 
   if (!response.ok) {
-    const message = await response.text();
+    const message = await readSessionAwareApiError(response, "Bildirishnomalarni olishda xatolik bo'ldi");
     throw new Error(message || "Bildirishnomalarni olishda xatolik bo'ldi");
   }
 
@@ -786,7 +874,7 @@ export async function createNotification(payload: {
   });
 
   if (!response.ok) {
-    const message = await response.text();
+    const message = await readSessionAwareApiError(response, "Bildirishnoma yaratishda xatolik bo'ldi");
     throw new Error(message || "Bildirishnoma yaratishda xatolik bo'ldi");
   }
 
@@ -807,7 +895,7 @@ export async function fetchDueNotifications(limit = 50, channel?: string): Promi
   });
 
   if (!response.ok) {
-    const message = await response.text();
+    const message = await readSessionAwareApiError(response, "Due bildirishnomalarni olishda xatolik bo'ldi");
     throw new Error(message || "Due bildirishnomalarni olishda xatolik bo'ldi");
   }
 
@@ -825,7 +913,7 @@ export async function updateNotificationStatus(id: string, status: string, error
   });
 
   if (!response.ok) {
-    const message = await response.text();
+    const message = await readSessionAwareApiError(response, "Bildirishnoma statusini o'zgartirishda xatolik bo'ldi");
     throw new Error(message || "Bildirishnoma statusini o'zgartirishda xatolik bo'ldi");
   }
 
@@ -839,7 +927,7 @@ export async function retryNotification(id: string): Promise<NotificationRespons
   });
 
   if (!response.ok) {
-    const message = await response.text();
+    const message = await readSessionAwareApiError(response, "Bildirishnomani retry qilishda xatolik bo'ldi");
     throw new Error(message || "Bildirishnomani retry qilishda xatolik bo'ldi");
   }
 
@@ -882,8 +970,7 @@ export async function createMaterialRequestWithFiles(
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "So'rov yuborishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "So'rov yuborishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<MaterialRequestResponse>;
@@ -895,8 +982,7 @@ export async function fetchMaterialRequests(): Promise<MaterialRequestResponse[]
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "So'rovlarni olishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "So'rovlarni olishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<MaterialRequestResponse[]>;
@@ -913,8 +999,7 @@ export async function updateMaterialRequestStatus(id: string, status: string, no
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Holatni o'zgartirishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Holatni o'zgartirishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<MaterialRequestResponse>;
@@ -932,8 +1017,7 @@ export async function fetchGuestMaterialRequest(token: string): Promise<GuestMat
   const response = await fetch(`${API_BASE_URL}/material-requests/guest/${encodeURIComponent(token)}`);
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Guest so'rovni ochishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Guest so'rovni ochishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<GuestMaterialRequestResponse>;
@@ -953,8 +1037,7 @@ export async function updateGuestContact(
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Kontaktni saqlashda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Kontaktni saqlashda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<GuestMaterialRequestResponse>;
@@ -964,8 +1047,7 @@ export async function fetchGuestOffers(token: string): Promise<GuestStoreOfferRe
   const response = await fetch(`${API_BASE_URL}/material-requests/guest/${encodeURIComponent(token)}/offers`);
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Takliflarni olishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Takliflarni olishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<GuestStoreOfferResponse[]>;
@@ -978,8 +1060,7 @@ export async function selectGuestOffer(token: string, offerId: string): Promise<
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Taklif tanlashda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Taklif tanlashda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<OrderResponse>;
@@ -989,11 +1070,10 @@ export async function fetchGuestOrder(token: string): Promise<OrderResponse | nu
   const response = await fetch(`${API_BASE_URL}/material-requests/guest/${encodeURIComponent(token)}/order`);
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Buyurtmani olishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Buyurtmani olishda xatolik bo'ldi"));
   }
 
-  return response.json() as Promise<OrderResponse | null>;
+  return parseJsonOrNull<OrderResponse>(response);
 }
 
 export async function cancelGuestRequest(token: string, reason?: string): Promise<MaterialRequestResponse | OrderResponse> {
@@ -1006,8 +1086,7 @@ export async function cancelGuestRequest(token: string, reason?: string): Promis
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Bekor qilishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Bekor qilishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<MaterialRequestResponse | OrderResponse>;
@@ -1023,8 +1102,7 @@ export async function disputeGuestRequest(token: string, reason: string): Promis
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Nizo ochishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Nizo ochishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<MaterialRequestResponse | OrderResponse>;
@@ -1045,8 +1123,7 @@ export async function confirmGuestOrderDelivery(
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Yetkazishni tasdiqlashda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Yetkazishni tasdiqlashda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<OrderResponse>;
@@ -1061,8 +1138,7 @@ export async function rotateGuestMaterialRequestToken(token: string): Promise<{
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Guest linkni yangilashda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Guest linkni yangilashda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<{
@@ -1077,8 +1153,7 @@ export async function revokeGuestMaterialRequestToken(token: string): Promise<{ 
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Guest linkni bekor qilishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Guest linkni bekor qilishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<{ revoked: boolean }>;
@@ -1091,8 +1166,7 @@ export async function cancelMaterialRequest(id: string): Promise<MaterialRequest
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "So'rovni bekor qilishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "So'rovni bekor qilishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<MaterialRequestResponse>;
@@ -1104,8 +1178,7 @@ export async function fetchStores(): Promise<StoreResponse[]> {
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Do'konlarni olishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Do'konlarni olishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<StoreResponse[]>;
@@ -1128,8 +1201,7 @@ export async function createStoreApplication(payload: {
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Do'kon arizasini yuborishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Do'kon arizasini yuborishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<StoreResponse>;
@@ -1150,8 +1222,7 @@ export async function updateStoreStatus(
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Do'kon statusini o'zgartirishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Do'kon statusini o'zgartirishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<StoreResponse>;
@@ -1175,8 +1246,7 @@ export async function updateStoreProfile(
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Do'kon profilini o'zgartirishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Do'kon profilini o'zgartirishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<StoreResponse>;
@@ -1188,8 +1258,7 @@ export async function fetchStoreInbox(storeId: string): Promise<StoreInboxItemRe
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Do'kon inboxini olishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Do'kon inboxini olishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<StoreInboxItemResponse[]>;
@@ -1205,8 +1274,7 @@ export async function assignStoresToRequest(requestId: string, storeIds?: string
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Do'konlarga yuborishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Do'konlarga yuborishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<unknown>;
@@ -1218,8 +1286,7 @@ export async function fetchStoreOffers(requestId: string): Promise<StoreOfferRes
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Takliflarni olishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Takliflarni olishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<StoreOfferResponse[]>;
@@ -1234,8 +1301,7 @@ export async function fetchOwnStoreOffers(requestId: string, storeId: string): P
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Do'kon taklifini olishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Do'kon taklifini olishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<StoreOfferResponse[]>;
@@ -1262,8 +1328,7 @@ export async function createStoreOffer(
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Taklif yaratishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Taklif yaratishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<StoreOfferResponse>;
@@ -1279,8 +1344,7 @@ export async function declineStoreRequest(requestId: string, storeId: string, re
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "So'rovni rad etishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "So'rovni rad etishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<unknown>;
@@ -1296,8 +1360,7 @@ export async function withdrawStoreOffer(requestId: string, offerId: string, rea
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Taklifni qaytarishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Taklifni qaytarishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<StoreOfferResponse>;
@@ -1310,8 +1373,7 @@ export async function selectOffer(requestId: string, offerId: string): Promise<O
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Taklif tanlashda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Taklif tanlashda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<OrderResponse>;
@@ -1323,11 +1385,10 @@ export async function fetchOrderByRequest(requestId: string): Promise<OrderRespo
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Buyurtmani olishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Buyurtmani olishda xatolik bo'ldi"));
   }
 
-  return response.json() as Promise<OrderResponse | null>;
+  return parseJsonOrNull<OrderResponse>(response);
 }
 
 export async function fetchOrders(): Promise<OrderResponse[]> {
@@ -1336,8 +1397,7 @@ export async function fetchOrders(): Promise<OrderResponse[]> {
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Buyurtmalarni olishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Buyurtmalarni olishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<OrderResponse[]>;
@@ -1364,8 +1424,7 @@ export async function updateOrderStatus(
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Buyurtma holatini o'zgartirishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Buyurtma holatini o'zgartirishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<OrderResponse>;
@@ -1385,8 +1444,7 @@ export async function confirmOrderDelivery(
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Yetkazishni tasdiqlashda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Yetkazishni tasdiqlashda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<OrderResponse>;
@@ -1398,8 +1456,7 @@ export async function fetchFinanceLedger(): Promise<FinanceLedgerResponse[]> {
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Moliya jurnalini olishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Moliya jurnalini olishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<FinanceLedgerResponse[]>;
@@ -1411,8 +1468,7 @@ export async function fetchFinanceSummary(): Promise<FinanceSummaryResponse> {
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Moliya xulosasini olishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Moliya xulosasini olishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<FinanceSummaryResponse>;
@@ -1439,8 +1495,7 @@ export async function recordFinancePayment(
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "To'lovni yozishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "To'lovni yozishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<FinanceLedgerResponse>;
@@ -1462,8 +1517,7 @@ export async function recordFinanceAdjustment(
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Adjustment yozishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Adjustment yozishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<FinanceLedgerResponse>;
@@ -1475,8 +1529,7 @@ export async function fetchFinancePayouts(): Promise<FinancePayoutResponse[]> {
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Payoutlarni olishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Payoutlarni olishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<FinancePayoutResponse[]>;
@@ -1488,8 +1541,7 @@ export async function fetchDealerStatement(dealerId: string): Promise<DealerStat
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Dealer statement olishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Dealer statement olishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<DealerStatementResponse>;
@@ -1501,8 +1553,7 @@ export async function fetchStoreStatement(storeId: string): Promise<StoreStateme
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Store statement olishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Store statement olishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<StoreStatementResponse>;
@@ -1523,8 +1574,7 @@ export async function createFinancePayout(payload: {
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Payout yaratishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Payout yaratishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<FinancePayoutResponse>;
@@ -1546,8 +1596,7 @@ export async function updateFinancePayoutStatus(
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Payout statusini o'zgartirishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Payout statusini o'zgartirishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<FinancePayoutResponse>;
@@ -1559,8 +1608,7 @@ export async function fetchDealers(): Promise<DealerResponse[]> {
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Ustalarni olishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Ustalarni olishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<DealerResponse[]>;
@@ -1570,8 +1618,7 @@ export async function fetchDealerByReferral(referralCode: string): Promise<Deale
   const response = await fetch(`${API_BASE_URL}/dealers/referral/${encodeURIComponent(referralCode)}`);
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Referral kodi topilmadi");
+    throw new Error(await readSessionAwareApiError(response, "Referral kodi topilmadi"));
   }
 
   return response.json() as Promise<DealerPublicReferralResponse>;
@@ -1583,8 +1630,7 @@ export async function fetchDealerReferralTools(dealerId: string): Promise<Dealer
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Referral tools yuklanmadi");
+    throw new Error(await readSessionAwareApiError(response, "Referral tools yuklanmadi"));
   }
 
   return response.json() as Promise<DealerReferralToolsResponse>;
@@ -1596,8 +1642,7 @@ export async function fetchDealerRequests(dealerId: string): Promise<DealerReque
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Usta requestlari yuklanmadi");
+    throw new Error(await readSessionAwareApiError(response, "Usta requestlari yuklanmadi"));
   }
 
   return response.json() as Promise<DealerRequestResponse[]>;
@@ -1609,8 +1654,7 @@ export async function fetchDealerSummary(dealerId: string): Promise<DealerSummar
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Usta summary yuklanmadi");
+    throw new Error(await readSessionAwareApiError(response, "Usta summary yuklanmadi"));
   }
 
   return response.json() as Promise<DealerSummaryResponse>;
@@ -1629,8 +1673,7 @@ export async function createDealer(payload: {
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Usta arizasini yaratishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Usta arizasini yaratishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<DealerResponse>;
@@ -1651,8 +1694,7 @@ export async function updateDealerStatus(
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Usta statusini o'zgartirishda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Usta statusini o'zgartirishda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<DealerResponse>;
@@ -1665,8 +1707,7 @@ export async function rotateDealerReferral(dealerId: string): Promise<DealerResp
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Referral kodini yangilashda xatolik bo'ldi");
+    throw new Error(await readSessionAwareApiError(response, "Referral kodini yangilashda xatolik bo'ldi"));
   }
 
   return response.json() as Promise<DealerResponse>;

@@ -13,9 +13,12 @@ import {
   type StoreOfferResponse,
   type StoreResponse
 } from "../../lib/api";
+import { formatStatusLabel } from "../../lib/labels";
+import { matchesSearch } from "../../lib/search";
 import type { RequestSummary } from "../../types/domain";
 
 type StoreOffersViewProps = {
+  searchQuery?: string;
   selectedRequest: RequestSummary;
 };
 
@@ -34,7 +37,7 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-export function StoreOffersView({ selectedRequest }: StoreOffersViewProps) {
+export function StoreOffersView({ searchQuery = "", selectedRequest }: StoreOffersViewProps) {
   const [stores, setStores] = useState<StoreResponse[]>([]);
   const [offers, setOffers] = useState<StoreOfferResponse[]>([]);
   const [storeInbox, setStoreInbox] = useState<StoreInboxItemResponse[]>([]);
@@ -63,6 +66,42 @@ export function StoreOffersView({ selectedRequest }: StoreOffersViewProps) {
 
     return Math.min(...offers.map((offer) => offer.totalAmountUzs));
   }, [offers]);
+  const filteredOffers = useMemo(
+    () =>
+      offers.filter((offer) =>
+        matchesSearch(searchQuery, [
+          offer.store.name,
+          offer.store.phone,
+          offer.status,
+          formatStatusLabel(offer.status),
+          offer.totalAmountUzs,
+          offer.materialSubtotalUzs,
+          offer.deliveryFeeUzs,
+          offer.deliveryEstimate,
+          offer.note
+        ])
+      ),
+    [offers, searchQuery]
+  );
+  const filteredStoreInbox = useMemo(
+    () =>
+      storeInbox.filter((item) =>
+        matchesSearch(searchQuery, [
+          item.publicCode,
+          item.customerDisplay,
+          item.region,
+          item.category,
+          item.description,
+          item.recipientStatus,
+          formatStatusLabel(item.recipientStatus),
+          item.requestStatus,
+          formatStatusLabel(item.requestStatus),
+          item.offer?.status,
+          item.offer?.totalAmountUzs
+        ])
+      ),
+    [searchQuery, storeInbox]
+  );
   const freeDeliveryCount = useMemo(() => offers.filter((offer) => offer.deliveryFeeUzs === 0).length, [offers]);
   const finalTotalPreview = Number(materialSubtotal || 0) + Number(deliveryFee || 0);
 
@@ -218,14 +257,16 @@ export function StoreOffersView({ selectedRequest }: StoreOffersViewProps) {
             </div>
 
             <div className="overflow-x-auto">
-              {offers.length === 0 ? (
+              {filteredOffers.length === 0 ? (
                 <div className="flex min-h-[320px] flex-col items-center justify-center px-6 py-12 text-center">
                   <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-smeta-soft text-smeta-clay shadow-smeta-soft">
                     <PackageSearch className="h-7 w-7" />
                   </div>
-                  <h4 className="mt-5 text-lg font-bold">Hali taklif yo'q</h4>
+                  <h4 className="mt-5 text-lg font-bold">{searchQuery.trim() ? "Qidiruv bo'yicha taklif topilmadi" : "Hali taklif yo'q"}</h4>
                   <p className="mt-2 max-w-md text-sm leading-6 text-smeta-mauve">
-                    Avval admin so'rovni mos do'konlarga yuboradi. Keyin har bir do'kon umumiy narx, muddat va dostavka shartini kiritadi.
+                    {searchQuery.trim()
+                      ? "Boshqa kalit so'z bilan qidiring yoki filtrni tozalang."
+                      : "Avval admin so'rovni mos do'konlarga yuboradi. Keyin har bir do'kon umumiy narx, muddat va dostavka shartini kiritadi."}
                   </p>
                 </div>
               ) : (
@@ -243,7 +284,7 @@ export function StoreOffersView({ selectedRequest }: StoreOffersViewProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {offers.map((offer) => (
+                    {filteredOffers.map((offer) => (
                       <tr key={offer.id}>
                         <td>
                           <div className="flex items-center gap-3">
@@ -299,14 +340,16 @@ export function StoreOffersView({ selectedRequest }: StoreOffersViewProps) {
               </button>
             </div>
 
-            {storeInbox.length === 0 ? (
+            {filteredStoreInbox.length === 0 ? (
               <div className="flex min-h-[180px] flex-col items-center justify-center px-6 py-8 text-center">
                 <Inbox className="h-9 w-9 text-smeta-mauve" />
-                <p className="mt-3 text-sm font-bold text-smeta-ink">Bu do'konga hali so'rov biriktirilmagan</p>
+                <p className="mt-3 text-sm font-bold text-smeta-ink">
+                  {searchQuery.trim() ? "Qidiruv bo'yicha inbox yozuvi topilmadi" : "Bu do'konga hali so'rov biriktirilmagan"}
+                </p>
               </div>
             ) : (
               <div className="divide-y divide-smeta-line">
-                {storeInbox.slice(0, 6).map((item) => (
+                {filteredStoreInbox.slice(0, 6).map((item) => (
                   <div key={item.recipientId} className="grid gap-3 px-4 py-4 md:grid-cols-[minmax(0,1fr)_160px] md:items-center">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">

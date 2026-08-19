@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, PackageCheck, RefreshCw, ShieldAlert, Truck } from "lucide-react";
 import { StatusPill } from "../../components/ui/StatusPill";
 import { confirmOrderDelivery, fetchOrders, updateOrderStatus, type OrderResponse } from "../../lib/api";
 import { formatStatusLabel } from "../../lib/labels";
+import { matchesSearch } from "../../lib/search";
 
 type OrderFulfillmentViewProps = {
   onOrdersChanged: () => Promise<void>;
+  searchQuery?: string;
 };
 
 const orderActions = [
@@ -59,7 +61,7 @@ const allowedTransitions: Record<string, string[]> = {
   ready: ["dispatched", "delivered_pending_confirmation", "canceled", "disputed"]
 };
 
-export function OrderFulfillmentView({ onOrdersChanged }: OrderFulfillmentViewProps) {
+export function OrderFulfillmentView({ onOrdersChanged, searchQuery = "" }: OrderFulfillmentViewProps) {
   const [orders, setOrders] = useState<OrderResponse[]>([]);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [busyStatus, setBusyStatus] = useState<string | null>(null);
@@ -69,7 +71,25 @@ export function OrderFulfillmentView({ onOrdersChanged }: OrderFulfillmentViewPr
   const [confirmNote, setConfirmNote] = useState("Mijoz materiallarni qabul qildi");
   const [error, setError] = useState<string | null>(null);
 
-  const selectedOrder = orders.find((order) => order.id === selectedOrderId) ?? orders[0] ?? null;
+  const filteredOrders = useMemo(
+    () =>
+      orders.filter((order) =>
+        matchesSearch(searchQuery, [
+          order.publicCode,
+          order.request.publicCode,
+          order.store.name,
+          order.status,
+          formatStatusLabel(order.status),
+          order.statusNote,
+          order.acceptedAmountUzs,
+          order.finalAmountUzs,
+          order.deliveryProofFileName,
+          order.deliveryProofNote
+        ])
+      ),
+    [orders, searchQuery]
+  );
+  const selectedOrder = filteredOrders.find((order) => order.id === selectedOrderId) ?? filteredOrders[0] ?? null;
 
   async function loadOrders() {
     try {
@@ -162,12 +182,12 @@ export function OrderFulfillmentView({ onOrdersChanged }: OrderFulfillmentViewPr
         {error ? <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
 
         <div className="mt-4 space-y-3">
-          {orders.length === 0 ? (
+          {filteredOrders.length === 0 ? (
             <p className="rounded-md bg-smeta-soft px-3 py-4 text-sm text-smeta-mauve">
-              Hali buyurtma yo'q. Avval mijoz takliflardan birini tanlashi kerak.
+              {searchQuery.trim() ? "Qidiruv bo'yicha buyurtma topilmadi." : "Hali buyurtma yo'q. Avval mijoz takliflardan birini tanlashi kerak."}
             </p>
           ) : (
-            orders.map((order) => (
+            filteredOrders.map((order) => (
               <button
                 key={order.id}
                 className={`w-full rounded-md border px-3 py-3 text-left transition ${

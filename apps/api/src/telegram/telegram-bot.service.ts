@@ -8,9 +8,16 @@ type TelegramButton = {
   url?: string;
 };
 
+type TelegramReplyKeyboardButton = {
+  requestContact?: boolean;
+  text: string;
+};
+
 type TelegramSendMessageInput = {
   buttons?: TelegramButton[][];
   chatId: string;
+  removeKeyboard?: boolean;
+  replyKeyboard?: TelegramReplyKeyboardButton[][];
   text: string;
 };
 
@@ -43,7 +50,22 @@ export class TelegramBotService {
                 }))
               )
             }
-          : undefined,
+          : input.replyKeyboard?.length
+            ? {
+                keyboard: input.replyKeyboard.map((row) =>
+                  row.map((button) => ({
+                    text: button.text,
+                    ...(button.requestContact ? { request_contact: true } : {})
+                  }))
+                ),
+                one_time_keyboard: true,
+                resize_keyboard: true
+              }
+            : input.removeKeyboard
+              ? {
+                  remove_keyboard: true
+                }
+              : undefined,
         text: input.text
       }),
       headers: {
@@ -70,12 +92,39 @@ export class TelegramBotService {
     return this.sendMessage(input);
   }
 
+  async answerCallbackQueryIfConfigured(callbackQueryId?: string) {
+    const botToken = process.env.TELEGRAM_BOT_TOKEN;
+
+    if (!botToken || !callbackQueryId) {
+      return {
+        skipped: true
+      };
+    }
+
+    const response = await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+      body: JSON.stringify({
+        callback_query_id: callbackQueryId
+      }),
+      headers: {
+        "Content-Type": "application/json"
+      },
+      method: "POST"
+    });
+    const body = (await response.json().catch(() => null)) as { description?: string; ok?: boolean } | null;
+
+    if (!response.ok || body?.ok === false) {
+      throw new Error(`Telegram callback javobi yuborilmadi: ${response.status} ${body?.description ?? "noma'lum xato"}`);
+    }
+
+    return body;
+  }
+
   buildMainMenu(input: { roles: UserRole[]; status: string }) {
     const buttons: TelegramButton[][] = [
       [
         {
           callbackData: "/status",
-          text: "Profil holati"
+          text: "Profilim"
         }
       ]
     ];
@@ -84,7 +133,7 @@ export class TelegramBotService {
       buttons.push([
         {
           callbackData: "/requests",
-          text: "Mening so'rovlarim"
+          text: "So'rovlarim"
         }
       ]);
     }
@@ -93,11 +142,11 @@ export class TelegramBotService {
       buttons.push([
         {
           callbackData: "/requests",
-          text: "Referral so'rovlar"
+          text: "Mijoz so'rovlari"
         },
         {
           callbackData: "/earnings",
-          text: "Usta reward"
+          text: "Daromadim"
         }
       ]);
     }
@@ -106,7 +155,7 @@ export class TelegramBotService {
       buttons.push([
         {
           callbackData: "/requests",
-          text: "Do'kon so'rovlari"
+          text: "Yangi so'rovlar"
         },
         {
           callbackData: "/orders",
@@ -119,11 +168,11 @@ export class TelegramBotService {
       buttons.push([
         {
           callbackData: "/requests",
-          text: "Admin navbat"
+          text: "Admin ishlari"
         },
         {
           callbackData: "/notifications",
-          text: "Outbox"
+          text: "Xabarlar"
         }
       ]);
     }
@@ -131,7 +180,7 @@ export class TelegramBotService {
     buttons.push([
       {
         callbackData: "/support",
-        text: "Yordam"
+        text: "Yordam markazi"
       }
     ]);
 
@@ -143,13 +192,53 @@ export class TelegramBotService {
       [
         {
           callbackData: "/apply_dealer",
-          text: "Usta/dealer arizasi",
+          text: "Usta bo'lish"
         }
       ],
       [
         {
           callbackData: "/apply_store",
-          text: "Do'kon arizasi",
+          text: "Do'kon bo'lish"
+        }
+      ]
+    ];
+  }
+
+  buildApplicationHelpButtons() {
+    return [
+      [
+        {
+          callbackData: "/apply_store",
+          text: "Do'kon bo'lish"
+        },
+        {
+          callbackData: "/apply_dealer",
+          text: "Usta bo'lish"
+        }
+      ],
+      [
+        {
+          callbackData: "/status",
+          text: "Profilim"
+        },
+        {
+          callbackData: "/support",
+          text: "Yordam markazi"
+        }
+      ]
+    ];
+  }
+
+  buildProfileHelpButtons() {
+    return [
+      [
+        {
+          callbackData: "/status",
+          text: "Profilim"
+        },
+        {
+          callbackData: "/support",
+          text: "Yordam markazi"
         }
       ]
     ];

@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, UnauthorizedException } from "@nestjs/common";
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "crypto";
+import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from "crypto";
 import { InjectRepository } from "@nestjs/typeorm";
-import { ROLE_LABELS, ROLE_PERMISSIONS, USER_ROLES, type UserRole } from "@smeta/shared";
+import { DEFAULT_STORE_COMMISSION_RATE, MATERIAL_CATEGORIES, ROLE_LABELS, ROLE_PERMISSIONS, USER_ROLES, type UserRole } from "@smeta/shared";
 import { Repository } from "typeorm";
 import { AuditService } from "../audit/audit.service";
 import { DealerEntity } from "../dealers/entities/dealer.entity";
@@ -18,6 +18,7 @@ import { ConfirmBrowserLoginDto, CreateBrowserLoginDto } from "./dto/browser-log
 import { TelegramExchangeDto } from "./dto/telegram-exchange.dto";
 import { AuthLoginNonceEntity } from "./entities/auth-login-nonce.entity";
 import { AuthSessionEntity } from "./entities/auth-session.entity";
+import { TelegramApplicationDraftEntity } from "./entities/telegram-application-draft.entity";
 import { TelegramUpdateEntity } from "./entities/telegram-update.entity";
 import { TelegramBotService } from "../telegram/telegram-bot.service";
 
@@ -30,6 +31,20 @@ type TelegramInitUser = {
 
 type BotShortcut = "finance" | "notifications" | "orders" | "requests" | "support";
 
+type DealerApplicationInput = {
+  companyName: string | null;
+  displayName: string;
+  phone: string;
+  region: string;
+};
+
+type StoreApplicationInput = {
+  categories: string[];
+  name: string;
+  phone: string;
+  serviceRegions: string[];
+};
+
 type TelegramProfile = {
   dealer: DealerEntity | null;
   roles: UserRole[];
@@ -37,6 +52,27 @@ type TelegramProfile = {
   telegramUserId: string;
   user: UserEntity;
 };
+
+type ApplicationDraftStep = "displayName" | "region" | "phone" | "companyName" | "storeName" | "serviceRegions" | "categories";
+
+const APPLICATION_REGIONS = [
+  "Toshkent shahri",
+  "Toshkent viloyati",
+  "Andijon viloyati",
+  "Buxoro viloyati",
+  "Farg'ona viloyati",
+  "Jizzax viloyati",
+  "Xorazm viloyati",
+  "Namangan viloyati",
+  "Navoiy viloyati",
+  "Qashqadaryo viloyati",
+  "Qoraqalpog'iston Respublikasi",
+  "Samarqand viloyati",
+  "Sirdaryo viloyati",
+  "Surxondaryo viloyati"
+];
+
+const APPLICATION_CATEGORIES = MATERIAL_CATEGORIES.map((category) => String(category));
 
 export type AuthenticatedSession = {
   accountStatus: string;
@@ -58,6 +94,8 @@ export class AuthService {
     private readonly loginNonceRepository: Repository<AuthLoginNonceEntity>,
     @InjectRepository(TelegramUpdateEntity)
     private readonly telegramUpdatesRepository: Repository<TelegramUpdateEntity>,
+    @InjectRepository(TelegramApplicationDraftEntity)
+    private readonly applicationDraftsRepository: Repository<TelegramApplicationDraftEntity>,
     @InjectRepository(MaterialRequestEntity)
     private readonly materialRequestsRepository: Repository<MaterialRequestEntity>,
     @InjectRepository(RequestRecipientEntity)
@@ -99,11 +137,13 @@ export class AuthService {
     const telegramUser = this.verifyTelegramInitData(dto.initData);
     const telegramUserId = String(telegramUser.id);
     const displayName = this.formatTelegramName(telegramUser);
-    const user = await this.usersService.upsertTelegramUser({
-      displayName,
-      telegramUserId,
-      telegramUsername: telegramUser.username ?? null
-    });
+    const user = await this.syncTelegramOwnedRoles(
+      await this.usersService.upsertTelegramUser({
+        displayName,
+        telegramUserId,
+        telegramUsername: telegramUser.username ?? null
+      })
+    );
     const role = this.resolveApprovedRole(user, dto.requestedRole);
     const session = this.toSession(user, role, "telegram_init_data");
     const { accessToken, expiresAt } = await this.createStoredSessionToken(user, session);
@@ -244,12 +284,35 @@ export class AuthService {
     const telegramUser = dto.initData
       ? this.verifyTelegramInitData(dto.initData)
       : this.devTelegramUser(dto.telegramUserId, dto.displayName, dto.telegramUsername);
-    const user = await this.usersService.upsertTelegramUser({
-      displayName: this.formatTelegramName(telegramUser),
-      telegramUserId: String(telegramUser.id),
-      telegramUsername: telegramUser.username ?? null
-    });
-    const role = this.resolveApprovedRole(user, login.requestedRole as UserRole | undefined);
+    const user = await this.syncTelegramOwnedRoles(
+      await this.usersService.upsertTelegramUser({
+        displayName: this.formatTelegramName(telegramUser),
+        telegramUserId: String(telegramUser.id),
+        telegramUsername: telegramUser.username ?? null
+      })
+    );
+    let role: UserRole;
+
+    try {
+      role = this.resolveApprovedRole(user, login.requestedRole as UserRole | undefined);
+    } catch (roleError) {
+      login.canceledAt = new Date();
+      login.status = "canceled";
+      await this.loginNonceRepository.save(login);
+      await this.auditService.record({
+        action: "auth.browser_login_rejected",
+        actorId: user.id,
+        actorRole: user.role,
+        entityId: login.id,
+        entityType: "auth_login_nonce",
+        metadata: {
+          reason: roleError instanceof Error ? roleError.message : "Role tasdiqlanmagan",
+          requestedRole: login.requestedRole,
+          telegramUserId: user.telegramUserId
+        }
+      });
+      throw roleError;
+    }
 
     login.confirmedAt = new Date();
     login.confirmedRole = role;
@@ -290,6 +353,10 @@ export class AuthService {
         id?: string;
       };
       message?: {
+        contact?: {
+          phone_number?: string;
+          user_id?: number | string;
+        };
         from?: TelegramInitUser;
         text?: string;
       };
@@ -320,22 +387,32 @@ export class AuthService {
     let error: string | null = null;
 
     try {
-      const text = normalized.message?.text ?? normalized.callback_query?.data ?? "";
+      const text = (normalized.message?.text ?? normalized.callback_query?.data ?? "").trim();
+      const contactPhone = normalized.message?.contact?.phone_number?.trim() ?? "";
       const from = normalized.message?.from ?? normalized.callback_query?.from;
       const loginNonce = this.extractLoginNonce(text);
 
-      if (loginNonce && from) {
-        const confirmation = await this.confirmBrowserLogin(loginNonce, {
-          displayName: this.formatTelegramName(from),
-          telegramUserId: String(from.id),
-          telegramUsername: from.username
-        });
-        await this.sendLoginSuccessMessage(String(from.id), loginNonce, confirmation);
-        eventType = "browser_login_confirmed";
-      } else if (text.startsWith("/start") && from) {
+      if (this.isBotCommand(text, "cancel") && from) {
+        eventType = await this.cancelApplicationDraft(from);
+      } else if (loginNonce && from) {
+        try {
+          const confirmation = await this.confirmBrowserLogin(loginNonce, {
+            displayName: this.formatTelegramName(from),
+            telegramUserId: String(from.id),
+            telegramUsername: from.username
+          });
+          await this.sendLoginSuccessMessage(String(from.id), loginNonce, confirmation);
+          eventType = "browser_login_confirmed";
+        } catch (loginError) {
+          await this.sendLoginRejectedMessage(String(from.id), loginError instanceof Error ? loginError.message : "Login tasdiqlanmadi");
+          eventType = "browser_login_rejected";
+        }
+      } else if (from && (contactPhone || text.startsWith("draft:") || (text && !text.startsWith("/"))) && (await this.hasActiveApplicationDraft(from))) {
+        eventType = await this.handleApplicationDraftAnswer(from, contactPhone || text, Boolean(contactPhone));
+      } else if (this.isBotCommand(text, "start") && from) {
         await this.sendWelcomeMessage(from, this.extractStartPayload(text));
         eventType = "start_message";
-      } else if (text.startsWith("/menu") && from) {
+      } else if (this.isBotCommand(text, "menu") && from) {
         await this.sendWelcomeMessage(from, null);
         eventType = "role_menu";
       } else if (this.isBotCommand(text, "status") && from) {
@@ -357,15 +434,18 @@ export class AuthService {
         await this.sendShortcutMessage(from, "support");
         eventType = "support_shortcut";
       } else if (this.isBotCommand(text, "apply_dealer") && from) {
-        await this.sendApplicationGuide(from, "dealer");
-        eventType = "dealer_application_guide";
+        eventType = await this.handleDealerApplication(from, text);
       } else if (this.isBotCommand(text, "apply_store") && from) {
-        await this.sendApplicationGuide(from, "store");
-        eventType = "store_application_guide";
+        eventType = await this.handleStoreApplication(from, text);
       } else if (this.isBotCommand(text, "help") && from) {
         await this.sendHelpMessage(from);
         eventType = "help_message";
+      } else if (from && text) {
+        await this.sendUnknownCommandMessage(from);
+        eventType = "unknown_command";
       }
+
+      await this.telegramBotService.answerCallbackQueryIfConfigured(normalized.callback_query?.id);
     } catch (webhookError) {
       status = "failed";
       error = webhookError instanceof Error ? webhookError.message : "Webhook processing failed";
@@ -638,13 +718,55 @@ export class AuthService {
     }
 
     const roles = this.normalizedRoles(user);
-    const role = requestedRole && roles.includes(requestedRole) ? requestedRole : roles[0];
+
+    if (requestedRole && !roles.includes(requestedRole)) {
+      const roleLabel = ROLE_LABELS[requestedRole];
+      throw new UnauthorizedException(
+        `${roleLabel} huquqi profilingizga hali biriktirilmagan. ${requestedRole === "dealer" || requestedRole === "store" ? "Avval ariza yuboring va tasdiqni kuting." : "Bu huquqni superadmin beradi."}`
+      );
+    }
+
+    const role = requestedRole ?? roles[0];
 
     if (!role) {
       throw new UnauthorizedException("Accountga tasdiqlangan rol biriktirilmagan");
     }
 
     return role;
+  }
+
+  private async syncTelegramOwnedRoles(user: UserEntity) {
+    if (!user.telegramUserId) {
+      return user;
+    }
+
+    let syncedUser = user;
+    const [dealer, store] = await Promise.all([
+      this.dealersRepository.findOne({
+        where: {
+          telegramUserId: user.telegramUserId
+        }
+      }),
+      this.storesRepository.findOne({
+        where: {
+          telegramUserId: user.telegramUserId
+        }
+      })
+    ]);
+
+    if (dealer?.status === "approved") {
+      syncedUser = (await this.usersService.addRoleByTelegramUserId(user.telegramUserId, "dealer")) ?? syncedUser;
+    } else if (dealer) {
+      syncedUser = (await this.usersService.removeRoleByTelegramUserId(user.telegramUserId, "dealer")) ?? syncedUser;
+    }
+
+    if (store?.status === "approved" && store.active) {
+      syncedUser = (await this.usersService.addRoleByTelegramUserId(user.telegramUserId, "store")) ?? syncedUser;
+    } else if (store) {
+      syncedUser = (await this.usersService.removeRoleByTelegramUserId(user.telegramUserId, "store")) ?? syncedUser;
+    }
+
+    return syncedUser;
   }
 
   private toSession(user: UserEntity, role: UserRole, source: string): AuthenticatedSession {
@@ -762,6 +884,18 @@ export class AuthService {
     });
   }
 
+  private async sendLoginRejectedMessage(chatId: string, message: string) {
+    const internalRole = message.includes("superadmin beradi");
+
+    await this.telegramBotService.sendMessageIfConfigured({
+      buttons: internalRole ? this.telegramBotService.buildProfileHelpButtons() : this.telegramBotService.buildApplicationHelpButtons(),
+      chatId,
+      text: internalRole
+        ? `${message}\n\nBu rol uchun botda ochiq ariza yo'q. Superadmin saytdagi Xavfsizlik bo'limidan foydalanuvchiga rol biriktiradi.`
+        : `${message}\n\nDo'kon yoki usta sifatida ishlash uchun ariza yuboring. Admin tasdiqlagandan keyin qayta login qiling.`
+    });
+  }
+
   private async sendWelcomeMessage(from: TelegramInitUser, startPayload: string | null) {
     const user = await this.usersService.upsertTelegramUser({
       displayName: this.formatTelegramName(from),
@@ -805,30 +939,24 @@ export class AuthService {
         displayName: user.displayName,
         roles,
         status: user.status
-      })}\n\nBuyruqlar:\n/status - profil holati\n/requests - so'rovlar va navbat\n/orders - buyurtmalar\n/earnings - usta/moliya\n/notifications - bildirishnomalar\n/support - yordam\n\nHar bir buyruq Telegram ichida qisqa dashboard beradi. Batafsil forma kerak bo'lgan joyda bot aniq keyingi qadamni aytadi.`
+      })}\n\nKerakli bo'limni pastdagi tugmalardan tanlang.\n\nDo'kon yoki usta sifatida ishlash uchun ariza yuboring. Admin tasdiqlagandan keyin mos kabinet ochiladi.`
     });
   }
 
   private async sendStatusMessage(from: TelegramInitUser) {
-    const user = await this.usersService.upsertTelegramUser({
-      displayName: this.formatTelegramName(from),
-      role: "customer",
-      telegramUserId: String(from.id),
-      telegramUsername: from.username ?? null
-    });
-    const roles = this.normalizedRoles(user);
+    const profile = await this.telegramProfile(from);
 
     await this.telegramBotService.sendMessageIfConfigured({
       buttons: this.telegramBotService.buildMainMenu({
-        roles,
-        status: user.status
+        roles: profile.roles,
+        status: profile.user.status
       }),
       chatId: String(from.id),
       text: `${this.telegramBotService.roleStatusText({
-        displayName: user.displayName,
-        roles,
-        status: user.status
-      })}\n\nAgar rolingiz pending bo'lsa, admin tasdiqlagandan keyin mos bo'limlar ochiladi.`
+        displayName: profile.user.displayName,
+        roles: profile.roles,
+        status: profile.user.status
+      })}\n\nAgar arizangiz tekshiruvda bo'lsa, tasdiqlangandan keyin mos bo'limlar avtomatik ochiladi.`
     });
   }
 
@@ -857,29 +985,659 @@ export class AuthService {
     const text = kind === "dealer" ? this.dealerApplicationText(profile.dealer) : this.storeApplicationText(profile.store);
 
     await this.telegramBotService.sendMessageIfConfigured({
-      buttons: this.telegramBotService.buildMainMenu({
-        roles: profile.roles,
-        status: profile.user.status
-      }),
+      buttons: this.telegramBotService.buildApplicationHelpButtons(),
       chatId: String(from.id),
       text
     });
   }
 
-  private dealerApplicationText(dealer: DealerEntity | null) {
-    if (!dealer) {
-      return "Usta/dealer arizasi botda boshlanadi.\n\nYuborish formati:\n/apply_dealer Ism Familiya | Hudud | Telefon | Brigada yoki kompaniya\n\nMisol:\n/apply_dealer Ali Valiyev | Namangan sh. | +998901234567 | Valiyev brigada";
+  private async handleDealerApplication(from: TelegramInitUser, text: string) {
+    const profile = await this.telegramProfile(from);
+    const body = this.commandBody(text, "apply_dealer");
+    const parsed = this.parseDealerApplication(text);
+
+    if (profile.dealer) {
+      await this.sendApplicationGuide(from, "dealer");
+      return "dealer_application_guide";
     }
 
-    return `Usta/dealer arizangiz topildi.\n\nNomi: ${dealer.displayName}\nHudud: ${dealer.region}\nHolat: ${dealer.status}\nReferral kod: ${dealer.referralCode}\n\nKeyingi tekshiruvlar:\n/requests - referral so'rovlar\n/earnings - reward va payout`;
+    if (!body || !parsed) {
+      await this.startApplicationDraft(profile, "dealer");
+      return "dealer_application_started";
+    }
+
+    return this.createDealerApplication(profile, parsed);
+  }
+
+  private async createDealerApplication(profile: TelegramProfile, parsed: DealerApplicationInput) {
+    const dealer = this.dealersRepository.create({
+      adminNote: "Telegram bot orqali yuborilgan ariza admin tekshiruvini kutmoqda",
+      companyName: parsed.companyName,
+      displayName: parsed.displayName,
+      phone: parsed.phone,
+      referralActive: false,
+      referralCode: await this.generateDealerReferralCode(parsed.displayName),
+      region: parsed.region,
+      status: "pending",
+      telegramUserId: profile.telegramUserId
+    });
+    const saved = await this.dealersRepository.save(dealer);
+
+    await this.auditService.record({
+      action: "dealer.application_created_from_bot",
+      actorId: profile.user.id,
+      actorRole: "customer",
+      entityId: saved.id,
+      entityType: "dealer",
+      metadata: {
+        displayName: saved.displayName,
+        referralCode: saved.referralCode,
+        region: saved.region,
+        telegramUserId: profile.telegramUserId
+      }
+    });
+
+    await this.enqueueAdminNotification({
+      bodyUz: `${saved.displayName} ${saved.region} hududidan Telegram bot orqali usta arizasini yubordi.`,
+      eventType: "dealer.application_created",
+      metadata: {
+        dealerId: saved.id,
+        referralCode: saved.referralCode,
+        source: "telegram_bot"
+      },
+      titleUz: "Yangi usta arizasi"
+    });
+
+    await this.telegramBotService.sendMessageIfConfigured({
+      buttons: this.telegramBotService.buildApplicationHelpButtons(),
+      chatId: profile.telegramUserId,
+      text: `Usta arizangiz qabul qilindi.\n\nHolat: Admin tekshiruvida\nIsm: ${saved.displayName}\nHudud: ${saved.region}\nTelefon: ${saved.phone}\nReferral kod: ${saved.referralCode}\n\nAdmin tasdiqlagandan keyin usta kabineti va referral havola ochiladi.`
+    });
+
+    return "dealer_application_created";
+  }
+
+  private async handleStoreApplication(from: TelegramInitUser, text: string) {
+    const profile = await this.telegramProfile(from);
+    const body = this.commandBody(text, "apply_store");
+    const parsed = this.parseStoreApplication(text);
+
+    if (profile.store) {
+      await this.sendApplicationGuide(from, "store");
+      return "store_application_guide";
+    }
+
+    if (!body || !parsed) {
+      await this.startApplicationDraft(profile, "store");
+      return "store_application_started";
+    }
+
+    return this.createStoreApplication(profile, parsed);
+  }
+
+  private async createStoreApplication(profile: TelegramProfile, parsed: StoreApplicationInput) {
+    const store = this.storesRepository.create({
+      active: false,
+      address: null,
+      adminNote: "Telegram bot orqali yuborilgan do'kon arizasi admin tekshiruvini kutmoqda",
+      categories: parsed.categories,
+      commissionRate: DEFAULT_STORE_COMMISSION_RATE,
+      name: parsed.name,
+      ownerName: profile.user.displayName,
+      phone: parsed.phone,
+      serviceRegions: parsed.serviceRegions,
+      status: "pending",
+      telegramUserId: profile.telegramUserId,
+      verifiedAt: null
+    });
+    const saved = await this.storesRepository.save(store);
+
+    await this.auditService.record({
+      action: "store.application_created_from_bot",
+      actorId: profile.user.id,
+      actorRole: "customer",
+      entityId: saved.id,
+      entityType: "store",
+      metadata: {
+        categories: saved.categories,
+        name: saved.name,
+        regionCount: saved.serviceRegions.length,
+        telegramUserId: profile.telegramUserId
+      }
+    });
+
+    await this.enqueueAdminNotification({
+      bodyUz: `${saved.name} do'koni Telegram bot orqali ariza yubordi. Hududlar: ${saved.serviceRegions.join(", ")}.`,
+      eventType: "store.application_created",
+      metadata: {
+        source: "telegram_bot",
+        storeId: saved.id
+      },
+      titleUz: "Yangi do'kon arizasi"
+    });
+
+    await this.telegramBotService.sendMessageIfConfigured({
+      buttons: this.telegramBotService.buildApplicationHelpButtons(),
+      chatId: profile.telegramUserId,
+      text: `Do'kon arizangiz qabul qilindi.\n\nHolat: Admin tekshiruvida\nDo'kon: ${saved.name}\nTelefon: ${saved.phone}\nHududlar: ${saved.serviceRegions.join(", ")}\nKategoriyalar: ${saved.categories.join(", ")}\n\nAdmin tasdiqlagandan keyin do'kon kabineti va so'rovlar inboxi ochiladi.`
+    });
+
+    return "store_application_created";
+  }
+
+  private async startApplicationDraft(profile: TelegramProfile, kind: "dealer" | "store") {
+    const activeDraft = await this.findActiveApplicationDraft(profile.telegramUserId);
+
+    if (activeDraft) {
+      activeDraft.status = "canceled";
+      await this.applicationDraftsRepository.save(activeDraft);
+    }
+
+    const step = kind === "dealer" ? "region" : "storeName";
+    const draft = await this.applicationDraftsRepository.save(
+      this.applicationDraftsRepository.create({
+        data: kind === "dealer" ? { displayName: profile.user.displayName } : {},
+        kind,
+        status: "active",
+        step,
+        telegramUserId: profile.telegramUserId
+      })
+    );
+
+    await this.sendApplicationDraftQuestion(profile.telegramUserId, draft, `${kind === "dealer" ? "Usta" : "Do'kon"} arizasini boshladik.`);
+  }
+
+  private async handleApplicationDraftAnswer(from: TelegramInitUser, text: string, sharedContact = false) {
+    const profile = await this.telegramProfile(from);
+    const draft = await this.findActiveApplicationDraft(profile.telegramUserId);
+
+    if (!draft) {
+      await this.sendUnknownCommandMessage(from);
+      return "unknown_command";
+    }
+
+    if (sharedContact && draft.step !== "phone") {
+      await this.sendApplicationDraftQuestion(profile.telegramUserId, draft, "Telefon raqamni keyingi bosqichda ulashasiz. Hozir quyidagi savolga javob bering.");
+      return `${draft.kind}_application_step_invalid`;
+    }
+
+    if (draft.step === "categories" && draft.data.awaitingCustomCategory === true && !text.startsWith("draft:")) {
+      const customCategory = text.trim();
+
+      if (!this.isValidField(customCategory, 80)) {
+        await this.telegramBotService.sendMessageIfConfigured({
+          buttons: [
+            [
+              {
+                callbackData: "/cancel",
+                text: "Bekor qilish"
+              }
+            ]
+          ],
+          chatId: profile.telegramUserId,
+          text: "Kategoriya nomi juda uzun yoki noto'g'ri. Qisqa nom yozing."
+        });
+        return `${draft.kind}_application_step_invalid`;
+      }
+
+      draft.data = {
+        ...draft.data,
+        awaitingCustomCategory: false,
+        categories: [customCategory]
+      };
+      draft.step = this.nextApplicationDraftStep(draft.kind, draft.step) ?? draft.step;
+      await this.applicationDraftsRepository.save(draft);
+      await this.sendApplicationDraftQuestion(profile.telegramUserId, draft, `"${customCategory}" kategoriyasi qabul qilindi.`);
+      return `${draft.kind}_application_step_saved`;
+    }
+
+    const selectionHandled = await this.handleApplicationDraftSelection(profile, draft, text);
+
+    if (selectionHandled) {
+      return selectionHandled;
+    }
+
+    const accepted = this.acceptApplicationDraftAnswer(draft, text, sharedContact);
+
+    if (!accepted.ok) {
+      await this.sendApplicationDraftQuestion(profile.telegramUserId, draft, accepted.message);
+      return `${draft.kind}_application_step_invalid`;
+    }
+
+    draft.data = {
+      ...draft.data,
+      [draft.step]: accepted.value
+    };
+    const nextStep = this.nextApplicationDraftStep(draft.kind, draft.step);
+
+    if (nextStep) {
+      draft.step = nextStep;
+      await this.applicationDraftsRepository.save(draft);
+
+      if (sharedContact) {
+        await this.telegramBotService.sendMessageIfConfigured({
+          chatId: profile.telegramUserId,
+          removeKeyboard: true,
+          text: "Telefon raqam qabul qilindi."
+        });
+      }
+
+      await this.sendApplicationDraftQuestion(profile.telegramUserId, draft);
+      return `${draft.kind}_application_step_saved`;
+    }
+
+    draft.status = "completed";
+    await this.applicationDraftsRepository.save(draft);
+
+    if (sharedContact) {
+      await this.telegramBotService.sendMessageIfConfigured({
+        chatId: profile.telegramUserId,
+        removeKeyboard: true,
+        text: "Telefon raqam qabul qilindi."
+      });
+    }
+
+    if (draft.kind === "dealer") {
+      const data = draft.data as Partial<Record<ApplicationDraftStep, unknown>>;
+      return this.createDealerApplication(profile, {
+        companyName: String(data.companyName ?? ""),
+        displayName: String(data.displayName ?? ""),
+        phone: String(data.phone ?? ""),
+        region: String(data.region ?? "")
+      });
+    }
+
+    const data = draft.data as Partial<Record<ApplicationDraftStep, unknown>>;
+    return this.createStoreApplication(profile, {
+      categories: Array.isArray(data.categories) ? data.categories.map(String) : [],
+      name: String(data.storeName ?? ""),
+      phone: String(data.phone ?? ""),
+      serviceRegions: Array.isArray(data.serviceRegions) ? data.serviceRegions.map(String) : []
+    });
+  }
+
+  private async cancelApplicationDraft(from: TelegramInitUser) {
+    const draft = await this.findActiveApplicationDraft(String(from.id));
+
+    if (draft) {
+      draft.status = "canceled";
+      await this.applicationDraftsRepository.save(draft);
+    }
+
+    await this.telegramBotService.sendMessageIfConfigured({
+      buttons: this.telegramBotService.buildApplicationHelpButtons(),
+      chatId: String(from.id),
+      text: draft ? "Ariza to'ldirish bekor qilindi." : "Hozir to'ldirilayotgan ariza yo'q."
+    });
+
+    return "application_draft_canceled";
+  }
+
+  private async hasActiveApplicationDraft(from: TelegramInitUser) {
+    return Boolean(await this.findActiveApplicationDraft(String(from.id)));
+  }
+
+  private findActiveApplicationDraft(telegramUserId: string) {
+    return this.applicationDraftsRepository.findOne({
+      order: {
+        updatedAt: "DESC"
+      },
+      where: {
+        status: "active",
+        telegramUserId
+      }
+    });
+  }
+
+  private async sendApplicationDraftQuestion(chatId: string, draft: TelegramApplicationDraftEntity, intro?: string) {
+    const keyboard = this.applicationDraftKeyboard(draft);
+    await this.telegramBotService.sendMessageIfConfigured({
+      ...keyboard,
+      chatId,
+      text: [intro, this.applicationDraftQuestion(draft.kind, draft.step)].filter(Boolean).join("\n\n")
+    });
+  }
+
+  private applicationDraftKeyboard(draft: TelegramApplicationDraftEntity) {
+    if (draft.step === "phone") {
+      return {
+        replyKeyboard: [
+          [
+            {
+              requestContact: true,
+              text: "Telefon raqamni ulashish"
+            }
+          ],
+          [
+            {
+              text: "/cancel"
+            }
+          ]
+        ]
+      };
+    }
+
+    if (draft.step === "region" || draft.step === "serviceRegions") {
+      return {
+        buttons: [
+          ...APPLICATION_REGIONS.map((region, index) => [
+            {
+              callbackData: `draft:region:${index}`,
+              text: region
+            }
+          ]),
+          [
+            {
+              callbackData: "/cancel",
+              text: "Bekor qilish"
+            }
+          ]
+        ]
+      };
+    }
+
+    if (draft.step === "categories") {
+      return {
+        buttons: [
+          ...APPLICATION_CATEGORIES.map((category, index) => [
+            {
+              callbackData: `draft:category:${index}`,
+              text: category
+            }
+          ]),
+          [
+            {
+              callbackData: "draft:category_other",
+              text: "Boshqa kategoriya"
+            }
+          ],
+          [
+            {
+              callbackData: "/cancel",
+              text: "Bekor qilish"
+            }
+          ]
+        ]
+      };
+    }
+
+    if (draft.step === "companyName") {
+      return {
+        buttons: [
+          [
+            {
+              callbackData: "draft:skip",
+              text: "O'tkazib yuborish"
+            },
+            {
+              callbackData: "/cancel",
+              text: "Bekor qilish"
+            }
+          ]
+        ]
+      };
+    }
+
+    return {
+      buttons: this.telegramBotService.buildProfileHelpButtons()
+    };
+  }
+
+  private async handleApplicationDraftSelection(profile: TelegramProfile, draft: TelegramApplicationDraftEntity, text: string) {
+    if (!text.startsWith("draft:")) {
+      return null;
+    }
+
+    if (text === "draft:skip" && draft.step === "companyName") {
+      draft.data = {
+        ...draft.data,
+        companyName: null
+      };
+      draft.status = "completed";
+      await this.applicationDraftsRepository.save(draft);
+
+      return this.createDealerApplication(profile, {
+        companyName: null,
+        displayName: String(draft.data.displayName ?? profile.user.displayName),
+        phone: String(draft.data.phone ?? ""),
+        region: String(draft.data.region ?? "")
+      });
+    }
+
+    if (text.startsWith("draft:region:")) {
+      const region = APPLICATION_REGIONS[Number(text.split(":")[2])];
+
+      if (!region) {
+        await this.sendApplicationDraftQuestion(profile.telegramUserId, draft, "Hudud topilmadi. Iltimos, ro'yxatdan tanlang.");
+        return `${draft.kind}_application_step_invalid`;
+      }
+
+      if (draft.step === "region") {
+        draft.data = {
+          ...draft.data,
+          region
+        };
+        draft.step = this.nextApplicationDraftStep(draft.kind, draft.step) ?? draft.step;
+        await this.applicationDraftsRepository.save(draft);
+        await this.sendApplicationDraftQuestion(profile.telegramUserId, draft);
+        return `${draft.kind}_application_step_saved`;
+      }
+
+      if (draft.step === "serviceRegions") {
+        draft.data = {
+          ...draft.data,
+          serviceRegions: [region]
+        };
+        draft.step = this.nextApplicationDraftStep(draft.kind, draft.step) ?? draft.step;
+        await this.applicationDraftsRepository.save(draft);
+        await this.sendApplicationDraftQuestion(profile.telegramUserId, draft, "Hudud qabul qilindi.");
+        return `${draft.kind}_application_step_saved`;
+      }
+    }
+
+    if (text.startsWith("draft:category:") && draft.step === "categories") {
+      const category = APPLICATION_CATEGORIES[Number(text.split(":")[2])];
+
+      if (!category) {
+        await this.sendApplicationDraftQuestion(profile.telegramUserId, draft, "Kategoriya topilmadi. Iltimos, ro'yxatdan tanlang.");
+        return `${draft.kind}_application_step_invalid`;
+      }
+
+      draft.data = {
+        ...draft.data,
+        awaitingCustomCategory: false,
+        categories: [category]
+      };
+      draft.step = this.nextApplicationDraftStep(draft.kind, draft.step) ?? draft.step;
+      await this.applicationDraftsRepository.save(draft);
+      await this.sendApplicationDraftQuestion(profile.telegramUserId, draft, "Kategoriya qabul qilindi.");
+      return `${draft.kind}_application_step_saved`;
+    }
+
+    if (text === "draft:category_other" && draft.step === "categories") {
+      draft.data = {
+        ...draft.data,
+        awaitingCustomCategory: true
+      };
+      await this.applicationDraftsRepository.save(draft);
+      await this.telegramBotService.sendMessageIfConfigured({
+        buttons: [
+          [
+            {
+              callbackData: "/cancel",
+              text: "Bekor qilish"
+            }
+          ]
+        ],
+        chatId: profile.telegramUserId,
+        text: "Ro'yxatda yo'q kategoriya nomini yozing.\n\nMasalan: Temir mahsulotlari"
+      });
+      return `${draft.kind}_application_custom_category_started`;
+    }
+
+    await this.sendApplicationDraftQuestion(profile.telegramUserId, draft, "Bu tugma hozirgi bosqichga mos emas.");
+    return `${draft.kind}_application_step_invalid`;
+  }
+
+  private acceptApplicationDraftAnswer(draft: TelegramApplicationDraftEntity, text: string, sharedContact = false) {
+    const value = text.trim();
+
+    if (!value) {
+      return {
+        message: "Bu maydon bo'sh bo'lmasligi kerak.",
+        ok: false as const
+      };
+    }
+
+    if (draft.step === "phone") {
+      const phone = this.normalizePhone(value);
+
+      if (!phone) {
+        return {
+          message: sharedContact ? "Kontakt ichida telefon raqam topilmadi." : "Telefon raqam noto'g'ri. Tugma orqali kontakt ulashing yoki +998901234567 ko'rinishida yuboring.",
+          ok: false as const
+        };
+      }
+
+      return {
+        ok: true as const,
+        value: phone
+      };
+    }
+
+    if (draft.step === "serviceRegions" || draft.step === "categories") {
+      return {
+        message: draft.step === "categories" ? "Kategoriyani tugmalardan tanlang yoki \"Boshqa kategoriya\"ni bosing." : "Hududni tugmalardan tanlang.",
+        ok: false as const
+      };
+    }
+
+    if (!this.isValidField(value, 160)) {
+      return {
+        message: "Matn juda uzun. Iltimos, qisqaroq yozing.",
+        ok: false as const
+      };
+    }
+
+    return {
+      ok: true as const,
+      value
+    };
+  }
+
+  private nextApplicationDraftStep(kind: "dealer" | "store", currentStep: string) {
+    const steps = kind === "dealer" ? ["region", "phone", "companyName"] : ["storeName", "serviceRegions", "categories", "phone"];
+    const index = steps.indexOf(currentStep);
+    return index >= 0 ? steps[index + 1] : undefined;
+  }
+
+  private applicationDraftQuestion(kind: "dealer" | "store", step: string) {
+    const steps = kind === "dealer" ? ["region", "phone", "companyName"] : ["storeName", "serviceRegions", "categories", "phone"];
+    const index = Math.max(steps.indexOf(step), 0) + 1;
+    const prefix = `${index}/${steps.length}.`;
+    const cancelText = "\n\nBekor qilish uchun /cancel yozing.";
+    const questions: Record<string, string> = {
+      categories: `${prefix} Asosiy mahsulot kategoriyasini tanlang. Ro'yxatda yo'q bo'lsa, "Boshqa kategoriya"ni bosing.`,
+      companyName: `${prefix} Brigada yoki kompaniya nomini yozing. Agar yo'q bo'lsa, "O'tkazib yuborish"ni bosing.`,
+      phone: `${prefix} Telefon raqamni tugma orqali ulashing. Bu admin siz bilan bog'lanishi uchun kerak.`,
+      region: `${prefix} Qaysi hududda ishlaysiz? Ro'yxatdan tanlang.`,
+      serviceRegions: `${prefix} Asosiy xizmat hududini tanlang. Qo'shimcha hududlarni keyin admin do'kon profiliga qo'sha oladi.`,
+      storeName: `${prefix} Do'kon nomini yozing.\nMasalan: Baraka Qurilish`
+    };
+
+    return `${questions[step] ?? "Ma'lumotni yozing."}${cancelText}`;
+  }
+
+  private dealerApplicationText(dealer: DealerEntity | null) {
+    if (!dealer) {
+      return [
+        "Usta sifatida kirish uchun ariza topshiring.",
+        "",
+        "Bot ma'lumotlarni bosqichma-bosqich oladi:",
+        "1. Hududni tugmadan tanlaysiz",
+        "2. Telefon raqamni kontakt orqali ulashasiz",
+        "3. Brigada yoki kompaniya nomini yozasiz yoki o'tkazib yuborasiz",
+        "",
+        "Ism Telegram profilingizdan olinadi. Ariza admin tekshiruviga tushadi. Tasdiqlangandan keyin usta kabineti ochiladi.",
+        "",
+        "Boshlash uchun pastdagi \"Usta bo'lish\" tugmasini bosing."
+      ].join("\n");
+    }
+
+    return `Usta arizangiz mavjud.\n\nHolat: ${this.applicationStatusLabel(dealer.status)}\nIsm: ${dealer.displayName}\nHudud: ${dealer.region}\nReferral kod: ${dealer.referralCode}\n\n${this.applicationNextStepText(dealer.status, "usta")}`;
   }
 
   private storeApplicationText(store: StoreEntity | null) {
     if (!store) {
-      return "Do'kon arizasi botda boshlanadi.\n\nYuborish formati:\n/apply_store Do'kon nomi | Hududlar | Kategoriyalar | Telefon\n\nMisol:\n/apply_store Baraka Qurilish | Namangan sh., Chust | Qurilish materiallari, Elektrika | +998901234567";
+      return [
+        "Do'kon sifatida kirish uchun ariza topshiring.",
+        "",
+        "Bot ma'lumotlarni bosqichma-bosqich oladi:",
+        "1. Do'kon nomini yozasiz",
+        "2. Asosiy xizmat hududini tugma orqali tanlaysiz",
+        "3. Asosiy kategoriyani tugma orqali tanlaysiz. Mos kelmasa, \"Boshqa kategoriya\" orqali o'zingiz yozasiz",
+        "4. Telefon raqamni kontakt orqali ulashasiz",
+        "",
+        "Ariza admin tekshiruviga tushadi. Tasdiqlangandan keyin do'kon kabineti ochiladi. Qo'shimcha hududlarni admin do'kon profiliga qo'shishi mumkin.",
+        "",
+        "Boshlash uchun pastdagi \"Do'kon bo'lish\" tugmasini bosing."
+      ].join("\n");
     }
 
-    return `Do'kon arizangiz topildi.\n\nDo'kon: ${store.name}\nHolat: ${store.status}\nHududlar: ${store.serviceRegions.join(", ")}\nKategoriyalar: ${store.categories.join(", ")}\n\nKeyingi tekshiruvlar:\n/requests - do'kon inbox\n/orders - buyurtmalar`;
+    return `Do'kon arizangiz mavjud.\n\nHolat: ${this.applicationStatusLabel(store.status)}\nDo'kon: ${store.name}\nHududlar: ${store.serviceRegions.join(", ")}\nKategoriyalar: ${store.categories.join(", ")}\n\n${this.applicationNextStepText(store.status, "do'kon")}`;
+  }
+
+  private applicationStatusLabel(status: string) {
+    const labels: Record<string, string> = {
+      accepted: "Qabul qilindi",
+      active: "Faol",
+      approved: "Tasdiqlangan",
+      archived: "Arxivlangan",
+      canceled: "Bekor qilingan",
+      collecting_offers: "Takliflar yig'ilyapti",
+      completed: "Yakunlangan",
+      correction_required: "Tuzatish kerak",
+      dead_letter: "Yuborib bo'lmadi",
+      delivered_pending_confirmation: "Mijoz tasdiqlashi kerak",
+      dispatched: "Yetkazishga chiqarildi",
+      disputed: "Nizo ochilgan",
+      expired: "Muddati o'tgan",
+      failed: "Yuborilmadi",
+      paid: "To'langan",
+      partial_paid: "Qisman to'langan",
+      pending: "Admin tekshiruvida",
+      pending_store_acceptance: "Do'kon qabul qilishi kerak",
+      preparing: "Tayyorlanmoqda",
+      published: "Do'konlarga yuborilgan",
+      ready: "Tayyor",
+      rejected: "Rad etilgan",
+      selected: "Tanlangan",
+      selection_open: "Tanlash ochiq",
+      sent: "Yuborildi",
+      skipped: "O'tkazilgan",
+      submitted: "Yuborilgan",
+      suspended: "To'xtatilgan"
+    };
+
+    return labels[status] ?? status;
+  }
+
+  private applicationNextStepText(status: string, kind: "do'kon" | "usta") {
+    if (status === "approved") {
+      return kind === "do'kon"
+        ? "Endi saytda Do'kon rolini tanlab Telegram orqali kiring."
+        : "Endi saytda Usta rolini tanlab Telegram orqali kiring.";
+    }
+
+    if (status === "pending") {
+      return "Hozir admin tekshiruvi kutilmoqda. Tasdiqlangandan keyin qayta login qiling.";
+    }
+
+    if (status === "rejected") {
+      return "Ariza rad etilgan. Ma'lumotlarni tuzatib, admin bilan bog'laning yoki yordamga yozing.";
+    }
+
+    return "Rol vaqtincha faol emas. Yordam bo'limi orqali admin bilan bog'laning.";
   }
 
   private async sendHelpMessage(from: TelegramInitUser) {
@@ -892,18 +1650,36 @@ export class AuthService {
       }),
       chatId: String(from.id),
       text:
-        "Smeta Market bot buyruqlari:\n\n/status - profil, rollar va tasdiq holati\n/requests - so'rovlar dashboardi\n/orders - buyurtmalar dashboardi\n/earnings - usta reward yoki moliya\n/notifications - oxirgi outbox va delivery holati\n/support - dispute, xavf va yordam navbati\n/apply_dealer - usta arizasi yo'riqnomasi\n/apply_store - do'kon arizasi yo'riqnomasi\n\nBot link tashlab qo'yish uchun emas: har buyruq Telegram ichida real holatni qisqa va amaliy qilib chiqaradi."
+        "Smeta Market yordam markazi\n\nProfilim - rolingiz va tasdiq holati.\nSo'rovlarim - sizga tegishli material so'rovlari.\nBuyurtmalar - faol va yakunlangan buyurtmalar.\nXabarlar - tizim yuborgan bildirishnomalar.\nYordam markazi - muammo yoki nizo bo'yicha holat.\n\nDo'kon yoki usta sifatida ishlash uchun ariza yuboring. Admin tasdiqlagandan keyin mos kabinet ochiladi."
+    });
+  }
+
+  private async sendUnknownCommandMessage(from: TelegramInitUser) {
+    const profile = await this.telegramProfile(from);
+
+    await this.telegramBotService.sendMessageIfConfigured({
+      buttons: [
+        ...this.telegramBotService.buildMainMenu({
+          roles: profile.roles,
+          status: profile.user.status
+        }),
+        ...this.telegramBotService.buildApplicationButtons()
+      ],
+      chatId: String(from.id),
+      text: "Bu buyruqni topa olmadim.\n\nKerakli bo'limni pastdagi tugmalardan tanlang yoki /help orqali qisqa yo'riqnomani oching."
     });
   }
 
   private async telegramProfile(from: TelegramInitUser): Promise<TelegramProfile> {
     const telegramUserId = String(from.id);
-    const user = await this.usersService.upsertTelegramUser({
+    const user = await this.syncTelegramOwnedRoles(
+      await this.usersService.upsertTelegramUser({
       displayName: this.formatTelegramName(from),
       role: "customer",
       telegramUserId,
       telegramUsername: from.username ?? null
-    });
+      })
+    );
     const [dealer, store] = await Promise.all([
       this.dealersRepository.findOne({
         where: {
@@ -918,17 +1694,22 @@ export class AuthService {
     ]);
     const roleSet = new Set<UserRole>(this.normalizedRoles(user));
 
-    if (dealer) {
+    if (dealer?.status === "approved") {
       roleSet.add("dealer");
+    } else if (dealer) {
+      roleSet.delete("dealer");
     }
 
-    if (store) {
+    if (store?.status === "approved" && store.active) {
       roleSet.add("store");
+    } else if (store) {
+      roleSet.delete("store");
     }
+    const roles = [...roleSet].filter((role): role is UserRole => USER_ROLES.includes(role));
 
     return {
       dealer,
-      roles: [...roleSet].filter((role): role is UserRole => USER_ROLES.includes(role)),
+      roles: roles.length ? roles : ["customer"],
       store,
       telegramUserId,
       user
@@ -946,15 +1727,15 @@ export class AuthService {
       const queue = requests.filter((request) => ["submitted", "under_review", "correction_required", "disputed"].includes(request.status)).slice(0, 5);
 
       return [
-        "So'rovlar dashboardi",
+        "So'rovlar holati",
         "",
-        `Jami oxirgi so'rovlar: ${requests.length}`,
-        `Statuslar: ${this.statusCounts(requests)}`,
+        `Oxirgi so'rovlar: ${requests.length}`,
+        `Holatlar: ${this.statusCounts(requests)}`,
         "",
-        queue.length ? "Admin e'tiboridagi oxirgi so'rovlar:" : "Admin e'tiborida turgan yangi so'rov yo'q.",
-        ...queue.map((request) => `- ${request.publicCode}: ${request.customerName}, ${request.region}, ${request.category}, ${request.status}`),
+        queue.length ? "Tekshiruv kerak bo'lgan so'rovlar:" : "Hozir tekshiruv kutayotgan yangi so'rov yo'q.",
+        ...queue.map((request) => `- ${request.publicCode}: ${request.customerName}, ${request.region}, ${request.category}, ${this.applicationStatusLabel(request.status)}`),
         "",
-        "Keyingi amallar: /orders - buyurtmalar, /notifications - outbox, /support - dispute navbati."
+        "Batafsil boshqaruv uchun saytdagi Admin navbati bo'limini oching."
       ].join("\n");
     }
 
@@ -997,9 +1778,9 @@ export class AuthService {
         `Hali taklif kutilmoqda: ${pending.length}`,
         "",
         pending.length ? "Taklif kerak bo'lgan oxirgi so'rovlar:" : "Hozir taklif kutilayotgan yangi so'rov yo'q.",
-        ...pending.map((recipient) => `- ${recipient.request.publicCode}: ${recipient.request.region}, ${recipient.request.category}, ${recipient.request.status}`),
+        ...pending.map((recipient) => `- ${recipient.request.publicCode}: ${recipient.request.region}, ${recipient.request.category}, ${this.applicationStatusLabel(recipient.request.status)}`),
         "",
-        "Keyingi amallar: /orders - qabul/bajarish holati, /support - nizolar."
+        "Taklif berish uchun saytdagi Do'kon takliflari bo'limini oching."
       ].join("\n");
     }
 
@@ -1017,17 +1798,17 @@ export class AuthService {
       });
 
       return [
-        `${profile.dealer.displayName} referral so'rovlari`,
+        `${profile.dealer.displayName} mijoz so'rovlari`,
         "",
         `Referral kod: ${profile.dealer.referralCode}`,
-        `Holat: ${profile.dealer.status}`,
+        `Holat: ${this.applicationStatusLabel(profile.dealer.status)}`,
         `Jami: ${requests.length}`,
-        `Statuslar: ${this.statusCounts(requests)}`,
+        `Holatlar: ${this.statusCounts(requests)}`,
         "",
         requests.length ? "Oxirgi so'rovlar:" : "Hali referral orqali so'rov tushmagan.",
-        ...requests.slice(0, 5).map((request) => `- ${request.publicCode}: ${request.region}, ${request.category}, ${request.status}`),
+        ...requests.slice(0, 5).map((request) => `- ${request.publicCode}: ${request.region}, ${request.category}, ${this.applicationStatusLabel(request.status)}`),
         "",
-        "Keyingi amallar: /earnings - reward, /orders - yakunlangan orderlar."
+        "Daromad hisobini ko'rish uchun Daromadim bo'limini oching."
       ].join("\n");
     }
 
@@ -1035,9 +1816,9 @@ export class AuthService {
       "Mijoz so'rovlari",
       "",
       "Bu Telegram profilingizga doimiy mijoz tarixi hali bog'lanmagan.",
-      "Agar sizda secure request link bo'lsa, o'sha link orqali request ochiladi; bot esa /notifications orqali kelgan xabarlarni ko'rsatadi.",
+      "Agar sizga maxsus havola yuborilgan bo'lsa, so'rov o'sha havola orqali ochiladi.",
       "",
-      "Yangi so'rov uchun usta referral havolasi yoki /support orqali operator yordamini so'rang."
+      "Yangi so'rov yuborish uchun usta havolasi orqali kiring yoki Yordam markaziga yozing."
     ].join("\n");
   }
 
@@ -1052,15 +1833,15 @@ export class AuthService {
       const active = orders.filter((order) => !["completed", "canceled"].includes(order.status)).slice(0, 5);
 
       return [
-        "Buyurtmalar dashboardi",
+        "Buyurtmalar holati",
         "",
-        `Jami oxirgi orderlar: ${orders.length}`,
-        `Statuslar: ${this.statusCounts(orders)}`,
+        `Oxirgi buyurtmalar: ${orders.length}`,
+        `Holatlar: ${this.statusCounts(orders)}`,
         "",
-        active.length ? "Faol orderlar:" : "Faol order yo'q.",
-        ...active.map((order) => `- ${order.publicCode}: ${order.store.name}, ${this.formatMoney(order.acceptedAmountUzs)}, ${order.status}`),
+        active.length ? "Faol buyurtmalar:" : "Hozir faol buyurtma yo'q.",
+        ...active.map((order) => `- ${order.publicCode}: ${order.store.name}, ${this.formatMoney(order.acceptedAmountUzs)}, ${this.applicationStatusLabel(order.status)}`),
         "",
-        "Keyingi amallar: /support - disputed orderlar, /earnings - moliya ko'rinishi."
+        "Batafsil boshqaruv uchun saytdagi Buyurtmalar bo'limini oching."
       ].join("\n");
     }
 
@@ -1083,12 +1864,12 @@ export class AuthService {
         "",
         `Jami: ${orders.length}`,
         `E'tibor kerak: ${actionNeeded.length}`,
-        `Statuslar: ${this.statusCounts(orders)}`,
+        `Holatlar: ${this.statusCounts(orders)}`,
         "",
         orders.length ? "Oxirgi buyurtmalar:" : "Hali buyurtma yo'q.",
-        ...orders.slice(0, 5).map((order) => `- ${order.publicCode}: ${this.formatMoney(order.acceptedAmountUzs)}, ${order.status}`),
+        ...orders.slice(0, 5).map((order) => `- ${order.publicCode}: ${this.formatMoney(order.acceptedAmountUzs)}, ${this.applicationStatusLabel(order.status)}`),
         "",
-        "Qabul qilish, tayyorlash va yetkazish statuslari shu order navbatiga qarab yuritiladi."
+        "Qabul qilish, tayyorlash va yetkazish ishlari saytdagi Buyurtmalar bo'limida yuritiladi."
       ].join("\n");
     }
 
@@ -1108,18 +1889,18 @@ export class AuthService {
       ).filter((order) => order.request.dealer?.id === profile.dealer?.id);
 
       return [
-        `${profile.dealer.displayName} referral orderlari`,
+        `${profile.dealer.displayName} mijoz buyurtmalari`,
         "",
         `Jami: ${orders.length}`,
         `Yakunlangan: ${orders.filter((order) => order.status === "completed").length}`,
-        `Statuslar: ${this.statusCounts(orders)}`,
+        `Holatlar: ${this.statusCounts(orders)}`,
         "",
-        orders.length ? "Oxirgi orderlar:" : "Hali referral order yo'q.",
-        ...orders.slice(0, 5).map((order) => `- ${order.publicCode}: ${order.store.name}, ${this.formatMoney(order.acceptedAmountUzs)}, ${order.status}`)
+        orders.length ? "Oxirgi buyurtmalar:" : "Hali referral orqali buyurtma yo'q.",
+        ...orders.slice(0, 5).map((order) => `- ${order.publicCode}: ${order.store.name}, ${this.formatMoney(order.acceptedAmountUzs)}, ${this.applicationStatusLabel(order.status)}`)
       ].join("\n");
     }
 
-    return "Buyurtmalar Telegram profilingizga hali bog'lanmagan. Agar order secure sahifadan yaratilgan bo'lsa, xabar kelganda /notifications ichida ko'rinadi.";
+    return "Buyurtmalar Telegram profilingizga hali bog'lanmagan. Buyurtma bo'yicha xabar kelganda Xabarlar bo'limida ko'rinadi.";
   }
 
   private async renderFinanceDashboard(profile: TelegramProfile) {
@@ -1134,15 +1915,15 @@ export class AuthService {
       const dealerReward = ledgers.reduce((sum, ledger) => sum + ledger.dealerRewardUzs, 0);
 
       return [
-        "Moliya dashboardi",
+        "Moliya holati",
         "",
-        `Ledgerlar: ${ledgers.length}`,
-        `Qoldiq store qarzi: ${this.formatMoney(remainingDebt)}`,
-        `Dealer reward jami: ${this.formatMoney(dealerReward)}`,
-        `Statuslar: ${this.statusCounts(ledgers)}`,
+        `Hisob yozuvlari: ${ledgers.length}`,
+        `Do'konlardan qoldiq qarz: ${this.formatMoney(remainingDebt)}`,
+        `Ustalarga hisoblangan daromad: ${this.formatMoney(dealerReward)}`,
+        `Holatlar: ${this.statusCounts(ledgers)}`,
         "",
-        ledgers.length ? "Oxirgi ledgerlar:" : "Ledger yozuvi hali yo'q.",
-        ...ledgers.slice(0, 5).map((ledger) => `- ${ledger.publicCode}: ${ledger.order.publicCode}, qarz ${this.formatMoney(Math.max(ledger.storeDebtUzs - ledger.paidAmountUzs, 0))}, ${ledger.status}`)
+        ledgers.length ? "Oxirgi yozuvlar:" : "Hali moliya yozuvi yo'q.",
+        ...ledgers.slice(0, 5).map((ledger) => `- ${ledger.publicCode}: ${ledger.order.publicCode}, qarz ${this.formatMoney(Math.max(ledger.storeDebtUzs - ledger.paidAmountUzs, 0))}, ${this.applicationStatusLabel(ledger.status)}`)
       ].join("\n");
     }
 
@@ -1165,15 +1946,15 @@ export class AuthService {
       const payable = ledgers.filter((ledger) => ledger.status === "paid" || ledger.status === "partial_paid").reduce((sum, ledger) => sum + ledger.dealerRewardUzs, 0);
 
       return [
-        `${profile.dealer.displayName} reward dashboardi`,
+        `${profile.dealer.displayName} daromadi`,
         "",
-        `Hisoblangan reward: ${this.formatMoney(reward)}`,
-        `Payable taxmin: ${this.formatMoney(payable)}`,
-        `Ledgerlar: ${ledgers.length}`,
-        `Statuslar: ${this.statusCounts(ledgers)}`,
+        `Hisoblangan daromad: ${this.formatMoney(reward)}`,
+        `To'lovga tayyor summa: ${this.formatMoney(payable)}`,
+        `Hisob yozuvlari: ${ledgers.length}`,
+        `Holatlar: ${this.statusCounts(ledgers)}`,
         "",
-        ledgers.length ? "Oxirgi yozuvlar:" : "Reward ledger hali yo'q.",
-        ...ledgers.slice(0, 5).map((ledger) => `- ${ledger.publicCode}: reward ${this.formatMoney(ledger.dealerRewardUzs)}, ${ledger.status}`)
+        ledgers.length ? "Oxirgi yozuvlar:" : "Hali daromad yozuvi yo'q.",
+        ...ledgers.slice(0, 5).map((ledger) => `- ${ledger.publicCode}: daromad ${this.formatMoney(ledger.dealerRewardUzs)}, ${this.applicationStatusLabel(ledger.status)}`)
       ].join("\n");
     }
 
@@ -1191,16 +1972,16 @@ export class AuthService {
       return [
         `${profile.store.name} moliya holati`,
         "",
-        `Ledgerlar: ${ledgers.length}`,
+        `Hisob yozuvlari: ${ledgers.length}`,
         `Qoldiq qarz: ${this.formatMoney(remainingDebt)}`,
-        `Statuslar: ${this.statusCounts(ledgers)}`,
+        `Holatlar: ${this.statusCounts(ledgers)}`,
         "",
-        ledgers.length ? "Oxirgi yozuvlar:" : "Hali finance ledger yo'q.",
-        ...ledgers.slice(0, 5).map((ledger) => `- ${ledger.publicCode}: ${this.formatMoney(Math.max(ledger.storeDebtUzs - ledger.paidAmountUzs, 0))}, ${ledger.status}`)
+        ledgers.length ? "Oxirgi yozuvlar:" : "Hali moliya yozuvi yo'q.",
+        ...ledgers.slice(0, 5).map((ledger) => `- ${ledger.publicCode}: ${this.formatMoney(Math.max(ledger.storeDebtUzs - ledger.paidAmountUzs, 0))}, ${this.applicationStatusLabel(ledger.status)}`)
       ].join("\n");
     }
 
-    return "Moliya bo'limi sizning Telegram profilingizga biriktirilmagan. Usta/dealer bo'lsangiz /apply_dealer holatini tekshiring yoki admin tasdiqini kuting.";
+    return "Moliya bo'limi profilingizga biriktirilmagan. Moliya huquqini faqat superadmin beradi.";
   }
 
   private async renderNotificationsDashboard(profile: TelegramProfile) {
@@ -1215,17 +1996,17 @@ export class AuthService {
       : latest.filter((notification) => notification.recipientRef === profile.telegramUserId || profile.roles.includes(notification.recipientRole as UserRole));
 
     return [
-      "Bildirishnomalar dashboardi",
+      "Xabarlar holati",
       "",
-      `Ko'rinadigan yozuvlar: ${visible.length}`,
-      `Statuslar: ${this.statusCounts(visible)}`,
+      `Sizga ko'rinadigan xabarlar: ${visible.length}`,
+      `Holatlar: ${this.statusCounts(visible)}`,
       "",
-      visible.length ? "Oxirgi xabarlar:" : "Sizga bog'langan notification hozircha yo'q.",
-      ...visible.slice(0, 7).map((notification) => `- ${notification.titleUz}: ${notification.status}, ${this.formatDate(notification.createdAt)}`),
+      visible.length ? "Oxirgi xabarlar:" : "Sizga bog'langan xabar hozircha yo'q.",
+      ...visible.slice(0, 7).map((notification) => `- ${notification.titleUz}: ${this.applicationStatusLabel(notification.status)}, ${this.formatDate(notification.createdAt)}`),
       "",
       visible.some((notification) => notification.status === "failed" || notification.status === "dead_letter")
-        ? "Diqqat: failed/dead_letter bor. Admin /support orqali delivery muammosini ko'radi."
-        : "Delivery navbati normal ko'rinyapti."
+        ? "Diqqat: ayrim xabarlar yuborilmagan. Admin Yordam markazi orqali tekshiradi."
+        : "Xabar yuborish holati normal."
     ].join("\n");
   }
 
@@ -1263,30 +2044,31 @@ export class AuthService {
 
     if (this.hasAnyRole(profile, ["admin", "superadmin"])) {
       return [
-        "Support va dispute dashboardi",
+        "Yordam markazi",
         "",
-        `Disputed requestlar: ${disputedRequests.length}`,
-        `Disputed orderlar: ${disputedOrders.length}`,
-        `Failed notificationlar: ${failedNotifications.length}`,
+        `Nizo ochilgan so'rovlar: ${disputedRequests.length}`,
+        `Nizo ochilgan buyurtmalar: ${disputedOrders.length}`,
+        `Yuborilmagan xabarlar: ${failedNotifications.length}`,
         "",
-        disputedRequests.length || disputedOrders.length ? "E'tibor kerak:" : "Hozir katta support navbati yo'q.",
-        ...disputedRequests.slice(0, 3).map((request) => `- Request ${request.publicCode}: ${request.customerName}, ${request.region}`),
-        ...disputedOrders.slice(0, 3).map((order) => `- Order ${order.publicCode}: ${order.store.name}, ${order.status}`),
+        disputedRequests.length || disputedOrders.length || failedNotifications.length ? "E'tibor kerak bo'lgan oxirgi holatlar:" : "Hozir shoshilinch murojaat yoki nizo yo'q.",
+        ...disputedRequests.slice(0, 3).map((request) => `- So'rov ${request.publicCode}: ${request.customerName}, ${request.region}`),
+        ...disputedOrders.slice(0, 3).map((order) => `- Buyurtma ${order.publicCode}: ${order.store.name}, ${this.applicationStatusLabel(order.status)}`),
+        ...failedNotifications.slice(0, 3).map((notification) => `- Xabar: ${notification.titleUz}, ${this.applicationStatusLabel(notification.status)}`),
         "",
-        "Tez tekshiruv: /requests, /orders, /notifications."
+        "Batafsil ko'rish uchun saytdagi Admin navbati, Buyurtmalar yoki Xabarlar bo'limini oching."
       ].join("\n");
     }
 
     return [
-      "Yordam",
+      "Yordam markazi",
       "",
-      "Muammo bo'lsa xabaringizda request/order kodi, telefon va qisqa sababni yozing.",
+      "Muammo bo'lsa, bitta xabarda so'rov yoki buyurtma kodi, telefon raqam va qisqa sababni yozing.",
       "Masalan: REQ-00012 bo'yicha taklif ko'rinmayapti.",
       "",
-      profile.store ? `Do'kon: ${profile.store.name}, holat: ${profile.store.status}` : null,
-      profile.dealer ? `Usta: ${profile.dealer.displayName}, holat: ${profile.dealer.status}` : null,
+      profile.store ? `Do'kon: ${profile.store.name}. Holat: ${this.applicationStatusLabel(profile.store.status)}.` : null,
+      profile.dealer ? `Usta: ${profile.dealer.displayName}. Holat: ${this.applicationStatusLabel(profile.dealer.status)}.` : null,
       "",
-      "Tez tekshiruv: /status, /requests, /orders, /notifications."
+      "Profil, so'rovlar va xabarlarni pastdagi tugmalar orqali tekshirishingiz mumkin."
     ]
       .filter((line): line is string => line !== null)
       .join("\n");
@@ -1308,7 +2090,7 @@ export class AuthService {
 
     return Object.entries(counts)
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([status, count]) => `${status}: ${count}`)
+      .map(([status, count]) => `${this.applicationStatusLabel(status)}: ${count}`)
       .join(", ");
   }
 
@@ -1332,6 +2114,161 @@ export class AuthService {
 
   private telegramWebAppUrl() {
     return (process.env.TELEGRAM_WEB_APP_URL ?? this.webAppUrl()).replace(/\/$/, "");
+  }
+
+  private parseDealerApplication(text: string): DealerApplicationInput | null {
+    const body = this.commandBody(text, "apply_dealer");
+
+    if (!body) {
+      return null;
+    }
+
+    const parts = this.splitApplicationParts(body, 4);
+
+    if (!parts) {
+      return null;
+    }
+
+    const [displayName, region, rawPhone, companyName] = parts;
+    const phone = this.normalizePhone(rawPhone);
+
+    if (!this.isValidField(displayName, 120) || !this.isValidField(region, 120) || !phone || !this.isValidField(companyName, 120)) {
+      return null;
+    }
+
+    return {
+      companyName,
+      displayName,
+      phone,
+      region
+    };
+  }
+
+  private parseStoreApplication(text: string): StoreApplicationInput | null {
+    const body = this.commandBody(text, "apply_store");
+
+    if (!body) {
+      return null;
+    }
+
+    const parts = this.splitApplicationParts(body, 4);
+
+    if (!parts) {
+      return null;
+    }
+
+    const [name, rawRegions, rawCategories, rawPhone] = parts;
+    const serviceRegions = this.parseCommaList(rawRegions, 20);
+    const categories = this.parseCommaList(rawCategories, 20);
+    const phone = this.normalizePhone(rawPhone);
+
+    if (!this.isValidField(name, 160) || serviceRegions.length === 0 || categories.length === 0 || !phone) {
+      return null;
+    }
+
+    return {
+      categories,
+      name,
+      phone,
+      serviceRegions
+    };
+  }
+
+  private commandBody(text: string, command: string) {
+    const match = text.trim().match(new RegExp(`^/${command}(?:@\\w+)?(?:\\s+([\\s\\S]+))?$`, "i"));
+    return match?.[1]?.trim() ?? null;
+  }
+
+  private splitApplicationParts(body: string, expectedCount: number) {
+    const parts = body
+      .split("|")
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+    return parts.length === expectedCount ? parts : null;
+  }
+
+  private parseCommaList(value: string, maxItems: number) {
+    return [
+      ...new Set(
+        value
+          .split(",")
+          .map((item) => item.trim())
+          .filter((item) => this.isValidField(item, 120))
+      )
+    ].slice(0, maxItems);
+  }
+
+  private normalizePhone(value: string) {
+    const normalized = value.replace(/[\s().-]/g, "");
+    const digits = normalized.replace(/\D/g, "");
+
+    if (digits.length === 9) {
+      return `+998${digits}`;
+    }
+
+    if (digits.length === 10 && digits.startsWith("0")) {
+      return `+998${digits.slice(1)}`;
+    }
+
+    if (digits.length === 12 && digits.startsWith("998")) {
+      return `+${digits}`;
+    }
+
+    if (!/^\+?\d{9,15}$/.test(normalized) || digits.length < 9 || digits.length > 15) {
+      return null;
+    }
+
+    return `+${digits}`;
+  }
+
+  private isValidField(value: string, maxLength: number) {
+    return value.trim().length > 0 && value.trim().length <= maxLength;
+  }
+
+  private async generateDealerReferralCode(displayName: string) {
+    const base =
+      displayName
+        .normalize("NFKD")
+        .replace(/[^\w\s-]/g, "")
+        .trim()
+        .split(/\s+/)
+        .slice(0, 2)
+        .join("-")
+        .toUpperCase()
+        .replace(/_/g, "-")
+        .slice(0, 18) || "USTA";
+
+    for (let index = 1; index <= 20; index += 1) {
+      const candidate = `${base}-${randomInt(1000, 10000)}`;
+      const exists = await this.dealersRepository.exist({
+        where: {
+          referralCode: candidate
+        }
+      });
+
+      if (!exists) {
+        return candidate;
+      }
+    }
+
+    return `USTA-${Date.now()}`;
+  }
+
+  private async enqueueAdminNotification(input: { bodyUz: string; eventType: string; metadata: Record<string, unknown>; titleUz: string }) {
+    await this.notificationsRepository.save(
+      this.notificationsRepository.create({
+        bodyUz: input.bodyUz,
+        channel: "web",
+        eventType: input.eventType,
+        metadata: input.metadata,
+        recipientRef: null,
+        recipientRole: "admin",
+        scheduledAt: null,
+        status: "pending",
+        titleUz: input.titleUz
+      })
+    );
   }
 
   private extractLoginNonce(text: string) {

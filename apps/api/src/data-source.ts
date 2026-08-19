@@ -3,6 +3,7 @@ import { DataSource } from "typeorm";
 import { AuditLogEntity } from "./audit/entities/audit-log.entity";
 import { AuthLoginNonceEntity } from "./auth/entities/auth-login-nonce.entity";
 import { AuthSessionEntity } from "./auth/entities/auth-session.entity";
+import { TelegramApplicationDraftEntity } from "./auth/entities/telegram-application-draft.entity";
 import { TelegramUpdateEntity } from "./auth/entities/telegram-update.entity";
 import { DealerEntity } from "./dealers/entities/dealer.entity";
 import { FinanceAdjustmentEntity } from "./finance/entities/finance-adjustment.entity";
@@ -40,6 +41,7 @@ export default new DataSource({
     RequestRecipientEntity,
     StoreEntity,
     StoreOfferEntity,
+    TelegramApplicationDraftEntity,
     TelegramUpdateEntity,
     UserEntity
   ],

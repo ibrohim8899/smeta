@@ -273,6 +273,19 @@ export class InitialV1Schema2026081400010 implements MigrationInterface {
       )
     `);
     await queryRunner.query(`
+      CREATE TABLE IF NOT EXISTS "telegram_application_drafts" (
+        "id" uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+        "telegram_user_id" varchar NOT NULL,
+        "kind" varchar NOT NULL,
+        "step" varchar NOT NULL,
+        "status" varchar NOT NULL DEFAULT 'active',
+        "data" jsonb NOT NULL,
+        "created_at" timestamptz NOT NULL DEFAULT now(),
+        "updated_at" timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "idx_telegram_application_drafts_active" ON "telegram_application_drafts" ("telegram_user_id", "status", "updated_at")`);
+    await queryRunner.query(`
       CREATE TABLE IF NOT EXISTS "app_settings" (
         "id" uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
         "key" varchar NOT NULL UNIQUE,
@@ -289,6 +302,7 @@ export class InitialV1Schema2026081400010 implements MigrationInterface {
 
   async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`DROP TABLE IF EXISTS "app_settings"`);
+    await queryRunner.query(`DROP TABLE IF EXISTS "telegram_application_drafts"`);
     await queryRunner.query(`DROP TABLE IF EXISTS "telegram_updates"`);
     await queryRunner.query(`DROP TABLE IF EXISTS "auth_login_nonces"`);
     await queryRunner.query(`DROP TABLE IF EXISTS "auth_sessions"`);

@@ -6,6 +6,7 @@ import { AuditService } from "../audit/audit.service";
 import { FinanceLedgerEntity } from "../finance/entities/finance-ledger.entity";
 import { MaterialRequestEntity } from "../material-requests/entities/material-request.entity";
 import { NotificationsService } from "../notifications/notifications.service";
+import { UsersService } from "../users/users.service";
 import { CreateDealerDto } from "./dto/create-dealer.dto";
 import { UpdateDealerStatusDto } from "./dto/update-dealer-status.dto";
 import { DealerEntity } from "./entities/dealer.entity";
@@ -20,7 +21,8 @@ export class DealersService {
     @InjectRepository(MaterialRequestEntity)
     private readonly requestsRepository: Repository<MaterialRequestEntity>,
     private readonly auditService: AuditService,
-    private readonly notificationsService: NotificationsService
+    private readonly notificationsService: NotificationsService,
+    private readonly usersService: UsersService
   ) {}
 
   async create(dto: CreateDealerDto) {
@@ -123,6 +125,12 @@ export class DealersService {
     dealer.referralActive = dto.referralActive ?? dto.status === "approved";
 
     const saved = await this.dealersRepository.save(dealer);
+
+    if (saved.status === "approved") {
+      await this.usersService.addRoleByTelegramUserId(saved.telegramUserId, "dealer");
+    } else {
+      await this.usersService.removeRoleByTelegramUserId(saved.telegramUserId, "dealer");
+    }
 
     await this.auditService.record({
       action: "dealer.status_updated",

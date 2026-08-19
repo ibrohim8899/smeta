@@ -18,6 +18,7 @@ export const navigationItems = [
   { key: "dashboard", label: "Boshqaruv", icon: LayoutDashboard, roles: ["admin", "finance", "superadmin"] },
   { key: "customer", label: "Mijoz so'rovi", icon: FilePlus2, roles: ["customer", "dealer", "admin", "superadmin"] },
   { key: "admin", label: "Admin navbati", icon: ClipboardList, roles: ["admin", "superadmin"] },
+  { key: "stores", label: "Do'konlar", icon: Store, roles: ["admin", "superadmin"] },
   { key: "store", label: "Do'kon takliflari", icon: Store, roles: ["store", "admin", "superadmin"] },
   { key: "selection", label: "Mijoz tanlovi", icon: ShoppingBag, roles: ["customer", "admin", "superadmin"] },
   { key: "orders", label: "Buyurtmalar", icon: PackageCheck, roles: ["customer", "dealer", "store", "admin", "finance", "superadmin"] },

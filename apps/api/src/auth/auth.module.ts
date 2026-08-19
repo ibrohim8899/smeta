@@ -14,6 +14,7 @@ import { TelegramModule } from "../telegram/telegram.module";
 import { UsersModule } from "../users/users.module";
 import { AuthController } from "./auth.controller";
 import { AuthLoginNonceEntity } from "./entities/auth-login-nonce.entity";
+import { TelegramApplicationDraftEntity } from "./entities/telegram-application-draft.entity";
 import { AuthSessionEntity } from "./entities/auth-session.entity";
 import { TelegramUpdateEntity } from "./entities/telegram-update.entity";
 import { AuthService } from "./auth.service";
@@ -37,6 +38,7 @@ import { TelegramWebhookController } from "./telegram-webhook.controller";
       RequestRecipientEntity,
       StoreEntity,
       StoreOfferEntity,
+      TelegramApplicationDraftEntity,
       TelegramUpdateEntity
     ]),
     UsersModule

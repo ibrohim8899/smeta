@@ -15,6 +15,7 @@ import { ReferralLandingView } from "../features/referral-landing/ReferralLandin
 import { ReportsView } from "../features/reports/ReportsView";
 import { SecurityView } from "../features/security/SecurityView";
 import { StoreOffersView } from "../features/store-offers/StoreOffersView";
+import { StoresView } from "../features/stores/StoresView";
 import {
   assignStoresToRequest,
   cancelMaterialRequest,
@@ -23,11 +24,13 @@ import {
   fetchMaterialRequests,
   logoutCurrentSession,
   pollBrowserLogin,
+  sessionClearedEventName,
   storeSessionToken,
   switchAuthRole,
   updateMaterialRequestStatus,
   type AuthSessionResponse
 } from "../lib/api";
+import { matchesSearch } from "../lib/search";
 import type { RequestSummary } from "../types/domain";
 import type { ViewKey } from "../types/navigation";
 import { AppShell } from "./AppShell";
@@ -109,6 +112,17 @@ export function App() {
     }
   }, []);
 
+  useEffect(() => {
+    function handleSessionCleared() {
+      setSession(null);
+      setRequests([]);
+      setSelectedRequestId("");
+    }
+
+    window.addEventListener(sessionClearedEventName(), handleSessionCleared);
+    return () => window.removeEventListener(sessionClearedEventName(), handleSessionCleared);
+  }, []);
+
   const filteredRequests = useMemo(() => filterRequests(requests, searchQuery), [requests, searchQuery]);
   const selectedRequest = useMemo(
     () => filteredRequests.find((request) => request.id === selectedRequestId) ?? filteredRequests[0],
@@ -139,7 +153,7 @@ export function App() {
             <button className="mb-4 rounded-md border border-smeta-line bg-white px-3 py-2 text-sm font-semibold" onClick={() => setPublicCustomerFlow(false)}>
               Login ekraniga qaytish
             </button>
-            <CustomerRequestView onRequestCreated={async () => setPublicCustomerFlow(false)} />
+            <CustomerRequestView onRequestCreated={async () => undefined} />
           </div>
         </main>
       );
@@ -203,16 +217,17 @@ export function App() {
         />
       )}
       {activeView === "admin" && !selectedRequest && <EmptyRequestState onCreateRequest={() => setActiveView("customer")} />}
-      {activeView === "store" && selectedRequest && <StoreOffersView selectedRequest={selectedRequest} />}
+      {activeView === "stores" && <StoresView searchQuery={searchQuery} />}
+      {activeView === "store" && selectedRequest && <StoreOffersView searchQuery={searchQuery} selectedRequest={selectedRequest} />}
       {activeView === "store" && !selectedRequest && <EmptyRequestState onCreateRequest={() => setActiveView("customer")} />}
       {activeView === "selection" && selectedRequest && <CustomerSelectionView selectedRequest={selectedRequest} onOrderCreated={loadRequests} />}
       {activeView === "selection" && !selectedRequest && <EmptyRequestState onCreateRequest={() => setActiveView("customer")} />}
-      {activeView === "orders" && <OrderFulfillmentView onOrdersChanged={loadRequests} />}
-      {activeView === "dealer" && <DealerView />}
-      {activeView === "finance" && <FinanceView />}
+      {activeView === "orders" && <OrderFulfillmentView searchQuery={searchQuery} onOrdersChanged={loadRequests} />}
+      {activeView === "dealer" && <DealerView searchQuery={searchQuery} />}
+      {activeView === "finance" && <FinanceView searchQuery={searchQuery} />}
       {activeView === "reports" && <ReportsView />}
-      {activeView === "security" && <SecurityView />}
-      {activeView === "notifications" && <NotificationsView />}
+      {activeView === "security" && <SecurityView searchQuery={searchQuery} />}
+      {activeView === "notifications" && <NotificationsView searchQuery={searchQuery} />}
     </AppShell>
   );
 }
@@ -231,14 +246,12 @@ function navigationFallbackForRole(role: UserRole): ViewKey {
 }
 
 function filterRequests(requests: RequestSummary[], query: string) {
-  const normalizedQuery = normalizeSearch(query);
-
-  if (!normalizedQuery) {
+  if (!query.trim()) {
     return requests;
   }
 
   return requests.filter((request) =>
-    [
+    matchesSearch(query, [
       request.id,
       request.apiId,
       request.customer,
@@ -251,14 +264,8 @@ function filterRequests(requests: RequestSummary[], query: string) {
       request.statusLabel,
       request.budget,
       request.files
-    ]
-      .filter(Boolean)
-      .some((value) => normalizeSearch(String(value)).includes(normalizedQuery))
+    ])
   );
-}
-
-function normalizeSearch(value: string) {
-  return value.trim().toLowerCase().replace(/ʻ|‘|’|`/g, "'");
 }
 
 function EmptyRequestState({ onCreateRequest }: { onCreateRequest: () => void }) {
