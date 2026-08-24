@@ -22,7 +22,7 @@ type TelegramSendMessageInput = {
 };
 
 type DeepLinkContext = {
-  kind: "home" | "request" | "order" | "finance" | "dealer" | "store" | "support" | "referral" | "login";
+  kind: "home" | "request" | "order" | "finance" | "dealer" | "store" | "support" | "referral" | "login" | "notifications";
   ref?: string;
   role?: UserRole;
 };
@@ -123,8 +123,17 @@ export class TelegramBotService {
     const buttons: TelegramButton[][] = [
       [
         {
+          text: "Platformani ochish",
+          url: this.webAppLink({
+            kind: "home",
+            role: input.roles[0] ?? "customer"
+          })
+        }
+      ],
+      [
+        {
           callbackData: "/status",
-          text: "Profilim"
+          text: "Profil va ruxsatlar"
         }
       ]
     ];
@@ -133,12 +142,28 @@ export class TelegramBotService {
       buttons.push([
         {
           callbackData: "/requests",
-          text: "So'rovlarim"
+          text: "Mijoz so'rovlari"
+        },
+        {
+          text: "So'rov yaratish",
+          url: this.webAppLink({
+            kind: "request",
+            role: "customer"
+          })
         }
       ]);
     }
 
     if (input.roles.includes("dealer")) {
+      buttons.push([
+        {
+          text: "Usta kabineti",
+          url: this.webAppLink({
+            kind: "dealer",
+            role: "dealer"
+          })
+        }
+      ]);
       buttons.push([
         {
           callbackData: "/requests",
@@ -154,6 +179,15 @@ export class TelegramBotService {
     if (input.roles.includes("store")) {
       buttons.push([
         {
+          text: "Do'kon kabineti",
+          url: this.webAppLink({
+            kind: "store",
+            role: "store"
+          })
+        }
+      ]);
+      buttons.push([
+        {
           callbackData: "/requests",
           text: "Yangi so'rovlar"
         },
@@ -165,6 +199,15 @@ export class TelegramBotService {
     }
 
     if (input.roles.some((role) => ["admin", "finance", "superadmin"].includes(role))) {
+      buttons.push([
+        {
+          text: "Admin panelni ochish",
+          url: this.webAppLink({
+            kind: "request",
+            role: input.roles.includes("superadmin") ? "superadmin" : input.roles.includes("admin") ? "admin" : "finance"
+          })
+        }
+      ]);
       buttons.push([
         {
           callbackData: "/requests",
@@ -192,13 +235,13 @@ export class TelegramBotService {
       [
         {
           callbackData: "/apply_dealer",
-          text: "Usta bo'lish"
+          text: "Usta arizasi"
         }
       ],
       [
         {
           callbackData: "/apply_store",
-          text: "Do'kon bo'lish"
+          text: "Do'kon arizasi"
         }
       ]
     ];
@@ -209,11 +252,11 @@ export class TelegramBotService {
       [
         {
           callbackData: "/apply_store",
-          text: "Do'kon bo'lish"
+          text: "Do'kon arizasi"
         },
         {
           callbackData: "/apply_dealer",
-          text: "Usta bo'lish"
+          text: "Usta arizasi"
         }
       ],
       [
@@ -248,7 +291,7 @@ export class TelegramBotService {
     const roleLabels = input.roles.map((role) => ROLE_LABELS[role]).join(", ");
     const statusText = input.status === "active" ? "tasdiqlangan" : input.status;
 
-    return [`Salom, ${input.displayName}.`, `Holat: ${statusText}.`, `Rollar: ${roleLabels || "hali biriktirilmagan"}.`].join("\n");
+    return [`Smeta Market`, "", `Profil: ${input.displayName}`, `Holat: ${statusText}`, `Rollar: ${roleLabels || "hali biriktirilmagan"}`].join("\n");
   }
 
   loginSuccessButtons(nonce: string) {

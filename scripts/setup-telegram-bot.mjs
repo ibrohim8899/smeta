@@ -14,47 +14,47 @@ await callTelegram("setMyCommands", {
   commands: [
     {
       command: "start",
-      description: "Platformani boshlash"
+      description: "Smeta Market menyusini ochish"
     },
     {
       command: "login",
-      description: "Website login kodini tasdiqlash"
+      description: "Website kirishini tasdiqlash"
     },
     {
       command: "menu",
-      description: "Rol menyusini qayta ochish"
+      description: "Asosiy menyuni qayta ochish"
     },
     {
       command: "status",
-      description: "Profil va rol holatini ko'rish"
+      description: "Profil va ruxsatlarni ko'rish"
     },
     {
       command: "requests",
-      description: "So'rovlar bo'limini ochish"
+      description: "Material so'rovlari holati"
     },
     {
       command: "orders",
-      description: "Buyurtmalar bo'limini ochish"
+      description: "Buyurtmalar holati"
     },
     {
       command: "earnings",
-      description: "Usta reward yoki moliya bo'limi"
+      description: "Usta daromadi yoki moliya holati"
     },
     {
       command: "notifications",
-      description: "Bildirishnomalar tarixini ochish"
+      description: "Bildirishnomalar holati"
     },
     {
       command: "support",
-      description: "Yordam va dispute bo'limi"
+      description: "Yordam va nizo holati"
     },
     {
       command: "apply_dealer",
-      description: "Usta/dealer arizasi"
+      description: "Usta arizasini yuborish"
     },
     {
       command: "apply_store",
-      description: "Do'kon arizasi"
+      description: "Do'kon arizasini yuborish"
     },
     {
       command: "help",

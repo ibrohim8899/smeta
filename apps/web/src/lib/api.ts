@@ -51,19 +51,45 @@ async function readApiErrorMessage(response: Response, fallback: string) {
 async function readSessionAwareApiError(response: Response, fallback: string) {
   const message = await readApiErrorMessage(response, fallback);
 
-  if (response.status === 401) {
-    clearSessionToken();
+  if (response.status === 401 && isSessionInvalidMessage(message)) {
+    const sessionMessage = sessionInvalidMessage(message);
+    clearSessionToken(sessionMessage);
 
     if (message.includes("Sessiya muddati tugagan")) {
-      return "Sessiya muddati tugagan. Iltimos, Telegram orqali qayta kiring.";
+      return sessionMessage;
     }
 
     if (message.includes("Sessiya topilmadi")) {
-      return "Sessiya topilmadi. Iltimos, Telegram orqali qayta kiring.";
+      return sessionMessage;
     }
   }
 
   return message;
+}
+
+function isSessionInvalidMessage(message: string) {
+  return [
+    "Sessiya tokeni",
+    "Sessiya muddati tugagan",
+    "Sessiya roli noto'g'ri",
+    "Sessiya bekor qilingan",
+    "Sessiya topilmadi",
+    "Account faol emas",
+    "Account hali tasdiqlanmagan",
+    "User topilmadi"
+  ].some((part) => message.includes(part));
+}
+
+function sessionInvalidMessage(message: string) {
+  if (message.includes("Sessiya muddati tugagan") || message.includes("muddati tugagan")) {
+    return "Sessiya muddati tugagan. Iltimos, Telegram orqali qayta kiring.";
+  }
+
+  if (message.includes("Account")) {
+    return `${message}. Iltimos, admin bilan bog'laning yoki Telegram orqali qayta kiring.`;
+  }
+
+  return "Sessiya topilmadi yoki bekor qilingan. Iltimos, Telegram orqali qayta kiring.";
 }
 
 export function getStoredSessionToken() {
@@ -78,9 +104,9 @@ export function storeSessionToken(token: string) {
   window.localStorage.setItem(SESSION_STORAGE_KEY, token);
 }
 
-export function clearSessionToken() {
+export function clearSessionToken(reason?: string) {
   window.localStorage.removeItem(SESSION_STORAGE_KEY);
-  window.dispatchEvent(new Event(SESSION_CLEARED_EVENT));
+  window.dispatchEvent(new CustomEvent(SESSION_CLEARED_EVENT, { detail: { reason } }));
 }
 
 export function sessionClearedEventName() {
@@ -95,6 +121,7 @@ export type AuthSessionResponse = {
   role: string;
   roleLabel: string;
   source: string;
+  telegramUserId: string | null;
   userId: string | null;
 };
 
@@ -313,6 +340,8 @@ export type StoreResponse = {
   phone: string | null;
   serviceRegions: string[];
   status: string;
+  telegramLinked: boolean;
+  telegramUserId: string | null;
   updatedAt: string;
   verifiedAt: string | null;
 };
@@ -562,9 +591,10 @@ export async function fetchAuthSession(role?: string): Promise<AuthSessionRespon
   if (!response.ok) {
     const message = await readApiErrorMessage(response, "Rol ma'lumotini olishda xatolik bo'ldi");
 
-    if (response.status === 401 && message.includes("Sessiya topilmadi") && getStoredSessionToken()) {
-      clearSessionToken();
-      return fetchAuthSession(role);
+    if (response.status === 401 && isSessionInvalidMessage(message) && getStoredSessionToken()) {
+      const sessionMessage = sessionInvalidMessage(message);
+      clearSessionToken(sessionMessage);
+      throw new Error(sessionMessage);
     }
 
     throw new Error(message || "Rol ma'lumotini olishda xatolik bo'ldi");

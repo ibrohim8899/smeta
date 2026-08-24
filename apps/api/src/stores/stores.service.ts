@@ -276,11 +276,13 @@ export class StoresService {
         status: "approved"
       }
     });
+    const normalizedRegion = normalizeMatchValue(region);
+    const normalizedCategory = normalizeMatchValue(category);
 
     return stores.filter(
       (store) =>
-        store.serviceRegions.includes(region) &&
-        store.categories.some((storeCategory) => storeCategory.toLowerCase() === category.toLowerCase())
+        store.serviceRegions.some((storeRegion) => normalizeMatchValue(storeRegion) === normalizedRegion) &&
+        store.categories.some((storeCategory) => categoryMatches(normalizedCategory, normalizeMatchValue(storeCategory)))
     );
   }
 
@@ -306,6 +308,7 @@ export class StoresService {
       phone: store.phone,
       serviceRegions: store.serviceRegions,
       status: store.status,
+      telegramUserId: store.telegramUserId,
       telegramLinked: Boolean(store.telegramUserId),
       updatedAt: store.updatedAt,
       verifiedAt: store.verifiedAt
@@ -356,4 +359,29 @@ export class StoresService {
     const [firstName] = customerName.trim().split(/\s+/);
     return `${firstName || "Mijoz"} ***`;
   }
+}
+
+function normalizeMatchValue(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/['`’]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function categoryMatches(requestCategory: string, storeCategory: string) {
+  if (!requestCategory || !storeCategory) {
+    return false;
+  }
+
+  if (requestCategory === storeCategory) {
+    return true;
+  }
+
+  if (requestCategory.length < 4 || storeCategory.length < 4) {
+    return false;
+  }
+
+  return requestCategory.startsWith(storeCategory) || storeCategory.startsWith(requestCategory);
 }

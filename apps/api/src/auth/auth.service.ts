@@ -82,6 +82,7 @@ export type AuthenticatedSession = {
   role: UserRole;
   roleLabel: string;
   source: string;
+  telegramUserId: string | null;
   userId: string | null;
 };
 
@@ -614,6 +615,9 @@ export class AuthService {
     }
 
     const storedSession = await this.sessionsRepository.findOne({
+      relations: {
+        user: true
+      },
       where: {
         tokenHash: this.hashToken(token)
       }
@@ -631,6 +635,7 @@ export class AuthService {
       role: payload.role,
       roleLabel: ROLE_LABELS[payload.role],
       source: payload.source,
+      telegramUserId: payload.telegramUserId ?? storedSession.user?.telegramUserId ?? null,
       userId: payload.userId
     };
   }
@@ -650,6 +655,7 @@ export class AuthService {
       role: currentRole,
       roleLabel: ROLE_LABELS[currentRole],
       source: "local_role_preview",
+      telegramUserId: null,
       userId: null
     };
   }
@@ -778,6 +784,7 @@ export class AuthService {
       role,
       roleLabel: ROLE_LABELS[role],
       source,
+      telegramUserId: user.telegramUserId,
       userId: user.id
     };
   }
@@ -825,8 +832,9 @@ export class AuthService {
   }
 
   private normalizedRoles(user: UserEntity): UserRole[] {
-    const roles = user.roles?.length ? user.roles : [user.role];
-    return roles.filter((role): role is UserRole => USER_ROLES.includes(role as UserRole));
+    const roles = [user.role, ...(user.roles?.length ? user.roles : [])].filter(Boolean);
+    const normalized = roles.filter((role): role is UserRole => USER_ROLES.includes(role as UserRole));
+    return Array.from(new Set(normalized));
   }
 
   private normalizeRole(role?: string): UserRole {
@@ -880,7 +888,14 @@ export class AuthService {
     await this.telegramBotService.sendMessageIfConfigured({
       buttons: this.telegramBotService.loginSuccessButtons(nonce),
       chatId,
-      text: `Muvaffaqiyatli kirdingiz.\n\nUser: ${confirmation.displayName}\nRol: ${confirmation.roleLabel}\n\nPlatformaga qaytish uchun tugmani bosing.`,
+      text: [
+        "Kirish tasdiqlandi.",
+        "",
+        `Profil: ${confirmation.displayName}`,
+        `Rol: ${confirmation.roleLabel}`,
+        "",
+        "Brauzerdagi sessiya ochildi. Davom etish uchun platformaga qayting."
+      ].join("\n"),
     });
   }
 
@@ -897,13 +912,12 @@ export class AuthService {
   }
 
   private async sendWelcomeMessage(from: TelegramInitUser, startPayload: string | null) {
-    const user = await this.usersService.upsertTelegramUser({
+    await this.usersService.upsertTelegramUser({
       displayName: this.formatTelegramName(from),
       role: "customer",
       telegramUserId: String(from.id),
       telegramUsername: from.username ?? null
     });
-    const roles = this.normalizedRoles(user);
 
     if (startPayload?.startsWith("ref_")) {
       const referralCode = startPayload.replace(/^ref_/, "").trim();
@@ -911,7 +925,7 @@ export class AuthService {
         buttons: [
           [
             {
-              text: "Referral orqali so'rov yuborish",
+              text: "Material ro'yxatini yuborish",
               url: this.telegramBotService.webAppLink({
                 kind: "referral",
                 ref: referralCode,
@@ -921,25 +935,33 @@ export class AuthService {
           ]
         ],
         chatId: String(from.id),
-        text: `Referral havola qabul qilindi.\n\nKod: ${referralCode}\n\nMaterial so'rovini Web App ichida yuboring.`
+        text: [
+          "Referral havola qabul qilindi.",
+          "",
+          `Kod: ${referralCode}`,
+          "",
+          "Material ro'yxati rasm, PDF yoki Excel fayl bo'lishi mumkin. Kontakt va aniq manzil faqat g'olib do'kon tasdiqlangandan keyin ochiladi."
+        ].join("\n")
       });
       return;
     }
 
+    const profile = await this.telegramProfile(from);
+
     await this.telegramBotService.sendMessageIfConfigured({
       buttons: [
         ...this.telegramBotService.buildMainMenu({
-          roles,
-          status: user.status
+          roles: profile.roles,
+          status: profile.user.status
         }),
         ...this.telegramBotService.buildApplicationButtons()
       ],
       chatId: String(from.id),
       text: `${this.telegramBotService.roleStatusText({
-        displayName: user.displayName,
-        roles,
-        status: user.status
-      })}\n\nKerakli bo'limni pastdagi tugmalardan tanlang.\n\nDo'kon yoki usta sifatida ishlash uchun ariza yuboring. Admin tasdiqlagandan keyin mos kabinet ochiladi.`
+        displayName: profile.user.displayName,
+        roles: profile.roles,
+        status: profile.user.status
+      })}\n\nBu bot login, ariza va muhim xabarlar uchun rasmiy kanal. Asosiy ishlar Mini App ichida bajariladi.\n\nUsta yoki do'kon sifatida ishlash uchun ariza yuboring. Admin tasdiqlagandan keyin mos kabinet ochiladi.`
     });
   }
 
@@ -956,7 +978,7 @@ export class AuthService {
         displayName: profile.user.displayName,
         roles: profile.roles,
         status: profile.user.status
-      })}\n\nAgar arizangiz tekshiruvda bo'lsa, tasdiqlangandan keyin mos bo'limlar avtomatik ochiladi.`
+      })}\n\nTasdiqlangan rollar Mini App ichida alohida ruxsat bilan ishlaydi. Ariza tekshiruvda bo'lsa, admin qaroridan keyin tegishli kabinet avtomatik ochiladi.`
     });
   }
 
@@ -971,10 +993,7 @@ export class AuthService {
     };
 
     await this.telegramBotService.sendMessageIfConfigured({
-      buttons: this.telegramBotService.buildMainMenu({
-        roles: profile.roles,
-        status: profile.user.status
-      }),
+      buttons: this.shortcutButtons(profile, shortcut),
       chatId: String(from.id),
       text: await textByShortcut[shortcut]()
     });
@@ -1062,7 +1081,7 @@ export class AuthService {
     const body = this.commandBody(text, "apply_store");
     const parsed = this.parseStoreApplication(text);
 
-    if (profile.store) {
+    if (profile.store && profile.store.status !== "rejected") {
       await this.sendApplicationGuide(from, "store");
       return "store_application_guide";
     }
@@ -1076,10 +1095,15 @@ export class AuthService {
   }
 
   private async createStoreApplication(profile: TelegramProfile, parsed: StoreApplicationInput) {
-    const store = this.storesRepository.create({
+    const resubmittedStore = profile.store?.status === "rejected" ? profile.store : null;
+    const store = resubmittedStore ?? this.storesRepository.create();
+
+    Object.assign(store, {
       active: false,
       address: null,
-      adminNote: "Telegram bot orqali yuborilgan do'kon arizasi admin tekshiruvini kutmoqda",
+      adminNote: resubmittedStore
+        ? "Rad etilgan ariza Telegram bot orqali qayta yuborildi va admin tekshiruvini kutmoqda"
+        : "Telegram bot orqali yuborilgan do'kon arizasi admin tekshiruvini kutmoqda",
       categories: parsed.categories,
       commissionRate: DEFAULT_STORE_COMMISSION_RATE,
       name: parsed.name,
@@ -1093,7 +1117,7 @@ export class AuthService {
     const saved = await this.storesRepository.save(store);
 
     await this.auditService.record({
-      action: "store.application_created_from_bot",
+      action: resubmittedStore ? "store.application_resubmitted_from_bot" : "store.application_created_from_bot",
       actorId: profile.user.id,
       actorRole: "customer",
       entityId: saved.id,
@@ -1119,7 +1143,7 @@ export class AuthService {
     await this.telegramBotService.sendMessageIfConfigured({
       buttons: this.telegramBotService.buildApplicationHelpButtons(),
       chatId: profile.telegramUserId,
-      text: `Do'kon arizangiz qabul qilindi.\n\nHolat: Admin tekshiruvida\nDo'kon: ${saved.name}\nTelefon: ${saved.phone}\nHududlar: ${saved.serviceRegions.join(", ")}\nKategoriyalar: ${saved.categories.join(", ")}\n\nAdmin tasdiqlagandan keyin do'kon kabineti va so'rovlar inboxi ochiladi.`
+      text: `${resubmittedStore ? "Do'kon arizangiz qayta yuborildi." : "Do'kon arizangiz qabul qilindi."}\n\nHolat: Admin tekshiruvida\nDo'kon: ${saved.name}\nTelefon: ${saved.phone}\nHududlar: ${saved.serviceRegions.join(", ")}\nKategoriyalar: ${saved.categories.join(", ")}\n\nAdmin tasdiqlagandan keyin do'kon kabineti va so'rovlar ro'yxati ochiladi.`
     });
 
     return "store_application_created";
@@ -1634,7 +1658,9 @@ export class AuthService {
     }
 
     if (status === "rejected") {
-      return "Ariza rad etilgan. Ma'lumotlarni tuzatib, admin bilan bog'laning yoki yordamga yozing.";
+      return kind === "do'kon"
+        ? "Ariza rad etilgan. Yangi ma'lumot bilan qayta yuborish uchun pastdagi \"Do'kon arizasi\" tugmasini bosing."
+        : "Ariza rad etilgan. Ma'lumotlarni tuzatib, admin bilan bog'laning yoki yordamga yozing.";
     }
 
     return "Rol vaqtincha faol emas. Yordam bo'limi orqali admin bilan bog'laning.";
@@ -1649,8 +1675,19 @@ export class AuthService {
         status: profile.user.status
       }),
       chatId: String(from.id),
-      text:
-        "Smeta Market yordam markazi\n\nProfilim - rolingiz va tasdiq holati.\nSo'rovlarim - sizga tegishli material so'rovlari.\nBuyurtmalar - faol va yakunlangan buyurtmalar.\nXabarlar - tizim yuborgan bildirishnomalar.\nYordam markazi - muammo yoki nizo bo'yicha holat.\n\nDo'kon yoki usta sifatida ishlash uchun ariza yuboring. Admin tasdiqlagandan keyin mos kabinet ochiladi."
+      text: [
+        "Smeta Market yordam markazi",
+        "",
+        "Botning vazifasi: loginni tasdiqlash, ariza qabul qilish va muhim ish holatlarini xabar qilish.",
+        "",
+        "Profil va ruxsatlar - tasdiqlangan rollaringiz.",
+        "Mijoz so'rovlari - sizga tegishli material ro'yxatlari.",
+        "Buyurtmalar - qabul, tayyorlash, yetkazish va yakunlash holati.",
+        "Daromadim / Moliya - usta daromadi, do'kon qarzi yoki finance nazorati.",
+        "Xabarlar - yuborilgan va kutilayotgan bildirishnomalar.",
+        "",
+        "Narxlar va maxfiy takliflar faqat ruxsatli rolga ko'rsatiladi. Muammo bo'lsa, so'rov yoki buyurtma kodini yozib yuboring."
+      ].join("\n")
     });
   }
 
@@ -1666,7 +1703,7 @@ export class AuthService {
         ...this.telegramBotService.buildApplicationButtons()
       ],
       chatId: String(from.id),
-      text: "Bu buyruqni topa olmadim.\n\nKerakli bo'limni pastdagi tugmalardan tanlang yoki /help orqali qisqa yo'riqnomani oching."
+      text: "Buyruq topilmadi.\n\nKerakli bo'limni pastdagi tugmalardan tanlang yoki /help orqali qisqa yo'riqnomani oching."
     });
   }
 
@@ -1687,6 +1724,9 @@ export class AuthService {
         }
       }),
       this.storesRepository.findOne({
+        order: {
+          updatedAt: "DESC"
+        },
         where: {
           telegramUserId
         }
@@ -2072,6 +2112,40 @@ export class AuthService {
     ]
       .filter((line): line is string => line !== null)
       .join("\n");
+  }
+
+  private shortcutButtons(profile: TelegramProfile, shortcut: BotShortcut) {
+    const role = profile.roles[0] ?? "customer";
+    const kindByShortcut: Record<BotShortcut, "request" | "order" | "finance" | "support" | "notifications"> = {
+      finance: "finance",
+      notifications: "notifications",
+      orders: "order",
+      requests: "request",
+      support: "support"
+    };
+    const labelByShortcut: Record<BotShortcut, string> = {
+      finance: "Moliya bo'limini ochish",
+      notifications: "Xabarlarni ochish",
+      orders: "Buyurtmalarni ochish",
+      requests: profile.store ? "Do'kon so'rovlarini ochish" : profile.dealer ? "Usta so'rovlarini ochish" : "So'rovlarni ochish",
+      support: "Yordam bo'limini ochish"
+    };
+
+    return [
+      [
+        {
+          text: labelByShortcut[shortcut],
+          url: this.telegramBotService.webAppLink({
+            kind: kindByShortcut[shortcut],
+            role
+          })
+        }
+      ],
+      ...this.telegramBotService.buildMainMenu({
+        roles: profile.roles,
+        status: profile.user.status
+      })
+    ];
   }
 
   private hasAnyRole(profile: TelegramProfile, roles: string[]) {

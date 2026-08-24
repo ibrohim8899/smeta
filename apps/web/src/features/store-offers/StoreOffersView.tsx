@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ComponentType } from "react";
-import { Ban, CheckCircle2, Clock3, Inbox, PackageSearch, RefreshCw, Send, ShieldCheck, Store, Truck, WalletCards } from "lucide-react";
+import { AlertTriangle, Ban, CheckCircle2, Clock3, Inbox, PackageSearch, RefreshCw, Send, ShieldCheck, Store, Truck, WalletCards } from "lucide-react";
 import { StatusPill } from "../../components/ui/StatusPill";
 import {
   createStoreOffer,
   declineStoreRequest,
   fetchStoreInbox,
+  fetchOwnStoreOffers,
   fetchStoreOffers,
   fetchStores,
   withdrawStoreOffer,
@@ -20,6 +21,8 @@ import type { RequestSummary } from "../../types/domain";
 type StoreOffersViewProps = {
   searchQuery?: string;
   selectedRequest: RequestSummary;
+  sessionRole?: string;
+  sessionTelegramUserId?: string | null;
 };
 
 const moneyFormatter = new Intl.NumberFormat("uz-UZ");
@@ -37,28 +40,37 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-export function StoreOffersView({ searchQuery = "", selectedRequest }: StoreOffersViewProps) {
+export function StoreOffersView({ searchQuery = "", selectedRequest, sessionRole, sessionTelegramUserId }: StoreOffersViewProps) {
   const [stores, setStores] = useState<StoreResponse[]>([]);
   const [offers, setOffers] = useState<StoreOfferResponse[]>([]);
   const [storeInbox, setStoreInbox] = useState<StoreInboxItemResponse[]>([]);
   const [selectedStoreId, setSelectedStoreId] = useState("");
-  const [materialSubtotal, setMaterialSubtotal] = useState("23950000");
-  const [deliveryFee, setDeliveryFee] = useState("450000");
-  const [deliveryEstimate, setDeliveryEstimate] = useState("Bugun 18:00 gacha");
+  const [materialSubtotal, setMaterialSubtotal] = useState("");
+  const [deliveryFee, setDeliveryFee] = useState("");
+  const [deliveryEstimate, setDeliveryEstimate] = useState("");
   const [validityHours, setValidityHours] = useState("48");
   const [completeListAvailable, setCompleteListAvailable] = useState(true);
-  const [note, setNote] = useState("To'liq ro'yxat bo'yicha umumiy taklif");
+  const [note, setNote] = useState("");
   const [actionReason, setActionReason] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isInboxLoading, setIsInboxLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const isStoreSession = sessionRole === "store";
   const activeStores = useMemo(() => stores.filter((store) => store.active && store.status === "approved"), [stores]);
+  const ownStore = useMemo(
+    () => activeStores.find((store) => Boolean(store.telegramUserId) && store.telegramUserId === sessionTelegramUserId) ?? null,
+    [activeStores, sessionTelegramUserId]
+  );
   const selectedStore = useMemo(() => stores.find((store) => store.id === selectedStoreId) ?? null, [selectedStoreId, stores]);
   const currentInboxItem = useMemo(
     () => storeInbox.find((item) => item.requestId === selectedRequest.apiId) ?? null,
     [selectedRequest.apiId, storeInbox]
   );
+  const selectedStoreMatchesRegion = selectedStore?.serviceRegions.includes(selectedRequest.region) ?? false;
+  const selectedStoreMatchesCategory =
+    selectedStore?.categories.some((storeCategory) => storeCategory.toLowerCase() === selectedRequest.category.toLowerCase()) ?? false;
+  const canCreateOffer = Boolean(selectedStoreId && materialSubtotal && completeListAvailable && currentInboxItem);
   const bestOfferAmount = useMemo(() => {
     if (offers.length === 0) {
       return null;
@@ -107,12 +119,28 @@ export function StoreOffersView({ searchQuery = "", selectedRequest }: StoreOffe
 
   async function loadData() {
     try {
-      const [storesResult, offersResult] = await Promise.all([fetchStores(), fetchStoreOffers(selectedRequest.apiId)]);
-      const firstActiveStore = storesResult.find((store) => store.active);
+      const storesResult = await fetchStores();
+      const nextActiveStores = storesResult.filter((store) => store.active && store.status === "approved");
+      const nextOwnStore =
+        isStoreSession && sessionTelegramUserId
+          ? nextActiveStores.find((store) => store.telegramUserId === sessionTelegramUserId) ?? null
+          : null;
+      const firstActiveStore = nextActiveStores[0];
+      const nextSelectedStoreId = isStoreSession
+        ? nextOwnStore?.id || ""
+        : selectedStoreId && storesResult.some((store) => store.id === selectedStoreId)
+          ? selectedStoreId
+          : firstActiveStore?.id || "";
+      const offersResult =
+        isStoreSession && nextSelectedStoreId
+          ? await fetchOwnStoreOffers(selectedRequest.apiId, nextSelectedStoreId)
+          : isStoreSession
+            ? []
+            : await fetchStoreOffers(selectedRequest.apiId);
 
       setStores(storesResult);
       setOffers(offersResult);
-      setSelectedStoreId((current) => current || firstActiveStore?.id || storesResult[0]?.id || "");
+      setSelectedStoreId(nextSelectedStoreId);
       setError(null);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Do'kon takliflari yuklanmadi");
@@ -121,7 +149,7 @@ export function StoreOffersView({ searchQuery = "", selectedRequest }: StoreOffe
 
   useEffect(() => {
     void loadData();
-  }, [selectedRequest.apiId]);
+  }, [isStoreSession, selectedRequest.apiId, sessionTelegramUserId]);
 
   async function handleCreateOffer() {
     setIsSubmitting(true);
@@ -158,7 +186,7 @@ export function StoreOffersView({ searchQuery = "", selectedRequest }: StoreOffe
       setStoreInbox(await fetchStoreInbox(storeId));
       setError(null);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Do'kon inboxi yuklanmadi");
+      setError(loadError instanceof Error ? loadError.message : "Do'kon ish ro'yxati yuklanmadi");
     } finally {
       setIsInboxLoading(false);
     }
@@ -214,11 +242,11 @@ export function StoreOffersView({ searchQuery = "", selectedRequest }: StoreOffe
             <div className="max-w-3xl">
               <div className="inline-flex items-center gap-2 rounded-full border border-smeta-line bg-smeta-surface/70 px-3 py-1 text-xs font-extrabold uppercase tracking-[0.16em] text-smeta-mauve">
                 <ShieldCheck className="h-3.5 w-3.5 text-smeta-clay" />
-                Maxfiy taklif yig'ish
+                Do'kon takliflari
               </div>
               <h3 className="mt-4 text-2xl font-bold tracking-tight sm:text-3xl">Takliflar: {selectedRequest.id}</h3>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-smeta-mauve">
-                Admin barcha takliflarni solishtiradi. Do'kon inboxi esa faqat tanlangan do'konning o'z requestlari va o'z taklifini ko'rsatadi.
+                Admin takliflarni solishtiradi. Do'kon faqat o'ziga yuborilgan so'rovlarni va o'z taklifini ko'radi.
               </p>
             </div>
 
@@ -331,8 +359,8 @@ export function StoreOffersView({ searchQuery = "", selectedRequest }: StoreOffe
           <div className="mt-5 overflow-hidden rounded-2xl border border-smeta-line bg-smeta-surface">
             <div className="flex flex-col gap-3 border-b border-smeta-line bg-smeta-soft/70 px-4 py-4 md:flex-row md:items-center md:justify-between">
               <div>
-                <p className="text-sm font-extrabold text-smeta-ink">Tanlangan do'kon inboxi</p>
-                <p className="mt-1 text-xs font-medium text-smeta-mauve">{selectedStore?.name ?? "Do'kon tanlanmagan"} uchun maxfiy ish ro'yxati</p>
+                <p className="text-sm font-extrabold text-smeta-ink">Do'konning ish ro'yxati</p>
+                <p className="mt-1 text-xs font-medium text-smeta-mauve">{selectedStore?.name ?? "Do'kon tanlanmagan"} uchun yuborilgan so'rovlar</p>
               </div>
               <button className="smeta-secondary-button w-fit" disabled={!selectedStoreId || isInboxLoading} onClick={() => void loadStoreInbox(selectedStoreId)}>
                 <RefreshCw className="h-4 w-4" />
@@ -344,7 +372,7 @@ export function StoreOffersView({ searchQuery = "", selectedRequest }: StoreOffe
               <div className="flex min-h-[180px] flex-col items-center justify-center px-6 py-8 text-center">
                 <Inbox className="h-9 w-9 text-smeta-mauve" />
                 <p className="mt-3 text-sm font-bold text-smeta-ink">
-                  {searchQuery.trim() ? "Qidiruv bo'yicha inbox yozuvi topilmadi" : "Bu do'konga hali so'rov biriktirilmagan"}
+                  {searchQuery.trim() ? "Qidiruv bo'yicha so'rov topilmadi" : "Bu do'konga hali so'rov yuborilmagan"}
                 </p>
               </div>
             ) : (
@@ -379,20 +407,27 @@ export function StoreOffersView({ searchQuery = "", selectedRequest }: StoreOffe
           </div>
           <div>
             <h3 className="text-xl font-bold">Do'kon taklifini yaratish</h3>
-            <p className="mt-1 text-sm leading-6 text-smeta-mauve">Admin yoki do'kon operatori umumiy narxni shu yerdan kiritadi.</p>
+            <p className="mt-1 text-sm leading-6 text-smeta-mauve">Do'kon umumiy narx va yetkazish shartlarini shu yerda kiritadi.</p>
           </div>
         </div>
 
         <div className="mt-6 space-y-4">
           <label className="block">
-            <span className="smeta-label">Do'kon</span>
-            <select className="smeta-input" value={selectedStoreId} onChange={(event) => setSelectedStoreId(event.target.value)}>
-              {activeStores.map((store) => (
-                <option key={store.id} value={store.id}>
-                  {store.name} · {store.status}
-                </option>
-              ))}
-            </select>
+            <span className="smeta-label">{isStoreSession ? "Sizning do'koningiz" : "Do'kon"}</span>
+            {isStoreSession ? (
+              <div className="smeta-input flex min-h-[46px] items-center font-bold">
+                {ownStore ? ownStore.name : "Bu akkauntga do'kon biriktirilmagan"}
+              </div>
+            ) : (
+              <select className="smeta-input" disabled={activeStores.length === 0} value={selectedStoreId} onChange={(event) => setSelectedStoreId(event.target.value)}>
+                <option value="">{activeStores.length === 0 ? "Faol do'kon yo'q" : "Do'kon tanlang"}</option>
+                {activeStores.map((store) => (
+                  <option key={store.id} value={store.id}>
+                    {store.name}
+                  </option>
+                ))}
+              </select>
+            )}
           </label>
 
           {selectedStore ? (
@@ -404,78 +439,140 @@ export function StoreOffersView({ searchQuery = "", selectedRequest }: StoreOffe
                 </div>
                 <StatusPill label={selectedStore.status} />
               </div>
-              <p className="mt-3 text-xs font-medium leading-5 text-smeta-mauve">
-                Hududlar: {selectedStore.serviceRegions.join(", ")} · Kategoriyalar: {selectedStore.categories.join(", ")}
-              </p>
+              <div className="mt-3 grid gap-2 text-xs font-bold sm:grid-cols-2 xl:grid-cols-1">
+                <CompatibilityPill label="Hudud" ok={selectedStoreMatchesRegion} requestValue={selectedRequest.region} storeValue={selectedStore.serviceRegions.join(", ")} />
+                <CompatibilityPill label="Kategoriya" ok={selectedStoreMatchesCategory} requestValue={selectedRequest.category} storeValue={selectedStore.categories.join(", ")} />
+              </div>
             </div>
           ) : null}
 
           {currentInboxItem ? (
-            <div className="rounded-2xl border border-smeta-line bg-smeta-surface px-4 py-3">
-              <p className="text-xs font-extrabold uppercase tracking-[0.12em] text-smeta-mauve">Joriy request bo'yicha do'kon holati</p>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <StatusPill label={currentInboxItem.recipientStatus} />
-                {currentInboxItem.offer ? <StatusPill label={currentInboxItem.offer.status} /> : null}
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+              <div className="flex items-start gap-3">
+                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
+                <div>
+                  <p className="font-black">So'rov do'konga yuborilgan</p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <StatusPill label={currentInboxItem.recipientStatus} />
+                    {currentInboxItem.offer ? <StatusPill label={currentInboxItem.offer.status} /> : null}
+                  </div>
+                </div>
               </div>
             </div>
           ) : (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
-              Tanlangan do'kon bu requestga biriktirilmagan. Backend taklifni qabul qilmaydi.
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+                <div>
+                  <p className="font-black">
+                    {selectedStore
+                      ? isStoreSession
+                        ? "So'rov sizning do'koningizga yuborilmagan"
+                        : "So'rov bu do'konga yuborilmagan"
+                      : isStoreSession
+                        ? "Do'koningiz topilmadi"
+                        : "Taklif uchun do'kon tanlanmagan"}
+                  </p>
+                  <p className="mt-1 leading-5">
+                    {selectedStore
+                      ? isStoreSession
+                        ? "Admin so'rovni sizning do'koningizga yuborgandan keyin narx kiritasiz."
+                        : "Admin avval so'rovni mos do'konga yuborishi kerak. Shundan keyin narx kiritiladi."
+                      : isStoreSession
+                        ? "Bu Telegram akkauntga faol va tasdiqlangan do'kon biriktirilishi kerak."
+                        : "Faol va tasdiqlangan do'kon bo'lsa, shu yerda tanlanadi."}
+                  </p>
+                </div>
+              </div>
             </div>
           )}
 
           <label className="block">
-            <span className="smeta-label">Material subtotal, UZS</span>
-            <input className="smeta-input" inputMode="numeric" value={materialSubtotal} onChange={(event) => setMaterialSubtotal(event.target.value.replace(/\D/g, ""))} />
+            <span className="smeta-label">Materiallar narxi, UZS</span>
+            <input
+              className="smeta-input"
+              disabled={!currentInboxItem}
+              inputMode="numeric"
+              placeholder="Masalan: 23950000"
+              value={materialSubtotal}
+              onChange={(event) => setMaterialSubtotal(event.target.value.replace(/\D/g, ""))}
+            />
           </label>
 
           <label className="block">
             <span className="smeta-label">Yetkazish haqi, UZS</span>
-            <input className="smeta-input" inputMode="numeric" value={deliveryFee} onChange={(event) => setDeliveryFee(event.target.value.replace(/\D/g, ""))} />
+            <input
+              className="smeta-input"
+              disabled={!currentInboxItem}
+              inputMode="numeric"
+              placeholder="Masalan: 450000"
+              value={deliveryFee}
+              onChange={(event) => setDeliveryFee(event.target.value.replace(/\D/g, ""))}
+            />
           </label>
 
           <div className="rounded-2xl border border-smeta-line bg-smeta-soft px-4 py-3">
-            <p className="text-xs font-extrabold uppercase tracking-[0.12em] text-smeta-mauve">Backend hisoblaydigan yakuniy summa</p>
+            <p className="text-xs font-extrabold uppercase tracking-[0.12em] text-smeta-mauve">Jami taklif summasi</p>
             <p className="mt-1 text-xl font-black">{formatMoney(finalTotalPreview)}</p>
           </div>
 
           <label className="block">
             <span className="smeta-label">Yetkazish muddati</span>
-            <input className="smeta-input" value={deliveryEstimate} onChange={(event) => setDeliveryEstimate(event.target.value)} />
+            <input className="smeta-input" disabled={!currentInboxItem} placeholder="Masalan: Bugun 18:00 gacha" value={deliveryEstimate} onChange={(event) => setDeliveryEstimate(event.target.value)} />
           </label>
 
           <label className="block">
-            <span className="smeta-label">Amal qilish muddati, soat</span>
-            <input className="smeta-input" inputMode="numeric" value={validityHours} onChange={(event) => setValidityHours(event.target.value.replace(/\D/g, ""))} />
+            <span className="smeta-label">Taklif amal qilish vaqti, soat</span>
+            <input className="smeta-input" disabled={!currentInboxItem} inputMode="numeric" value={validityHours} onChange={(event) => setValidityHours(event.target.value.replace(/\D/g, ""))} />
           </label>
 
           <label className="smeta-panel flex cursor-pointer items-center gap-3 px-4 py-3 text-sm font-bold">
-            <input checked={completeListAvailable} className="h-4 w-4 accent-[rgb(var(--smeta-clay))]" type="checkbox" onChange={(event) => setCompleteListAvailable(event.target.checked)} />
-            <span>Butun ro'yxatni bera olaman</span>
+            <input checked={completeListAvailable} className="h-4 w-4 accent-[rgb(var(--smeta-clay))]" disabled={!currentInboxItem} type="checkbox" onChange={(event) => setCompleteListAvailable(event.target.checked)} />
+            <span>Ro'yxatdagi hamma mahsulot bor</span>
           </label>
 
           <label className="block">
             <span className="smeta-label">Izoh</span>
-            <textarea className="smeta-input min-h-28 resize-none" value={note} onChange={(event) => setNote(event.target.value)} />
+            <textarea
+              className="smeta-input min-h-28 resize-none"
+              disabled={!currentInboxItem}
+              placeholder="Masalan: To'liq ro'yxat bo'yicha umumiy taklif"
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+            />
           </label>
 
           <label className="block">
-            <span className="smeta-label">Decline / withdraw sababi</span>
+            <span className="smeta-label">Rad etish yoki qaytarish sababi</span>
             <input className="smeta-input" value={actionReason} onChange={(event) => setActionReason(event.target.value)} />
           </label>
         </div>
 
-        <button className="smeta-primary-button mt-6 w-full" disabled={isSubmitting || !selectedStoreId || !materialSubtotal || !completeListAvailable || !currentInboxItem} onClick={handleCreateOffer}>
-          <Send className="h-4 w-4" />
-          {isSubmitting ? "Saqlanmoqda..." : "Taklif yuborish"}
-        </button>
+        {currentInboxItem ? (
+          <button className="smeta-primary-button mt-6 w-full" disabled={isSubmitting || !canCreateOffer} onClick={handleCreateOffer}>
+            <Send className="h-4 w-4 shrink-0" />
+            {isSubmitting ? "Saqlanmoqda..." : "Taklif yuborish"}
+          </button>
+        ) : (
+          <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+              <div>
+                <p className="font-black">{isStoreSession ? "Hozircha taklif yuborib bo'lmaydi" : "Avval do'konni biriktiring"}</p>
+                <p className="mt-1 leading-5">
+                  {isStoreSession ? "Admin bu so'rovni sizning do'koningizga yuborgandan keyin narx kiritasiz." : "So'rov tanlangan do'konga yuborilgandan keyin taklif kiritiladi."}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
-          <button className="smeta-secondary-button w-full" disabled={isSubmitting || !currentInboxItem || currentInboxItem.recipientStatus !== "assigned"} onClick={handleDeclineRequest}>
+          <button className="smeta-ghost-button min-h-11 w-full" disabled={isSubmitting || !currentInboxItem || currentInboxItem.recipientStatus !== "assigned"} onClick={handleDeclineRequest}>
             <Ban className="h-4 w-4" />
             So'rovni rad etish
           </button>
-          <button className="smeta-secondary-button w-full" disabled={isSubmitting || currentInboxItem?.offer?.status !== "submitted"} onClick={handleWithdrawOffer}>
+          <button className="smeta-ghost-button min-h-11 w-full" disabled={isSubmitting || currentInboxItem?.offer?.status !== "submitted"} onClick={handleWithdrawOffer}>
             <RefreshCw className="h-4 w-4" />
             Taklifni qaytarish
           </button>
@@ -497,6 +594,19 @@ type OfferStatProps = {
   note: string;
   value: string;
 };
+
+function CompatibilityPill({ label, ok, requestValue, storeValue }: { label: string; ok: boolean; requestValue: string; storeValue: string }) {
+  return (
+    <div className={`rounded-xl border px-3 py-2 ${ok ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
+      <div className="flex items-center gap-2">
+        {ok ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0" /> : <AlertTriangle className="h-3.5 w-3.5 shrink-0" />}
+        <span>{label}: {ok ? "mos" : "mos emas"}</span>
+      </div>
+      <p className="mt-1 font-medium leading-5 opacity-80">So'rov: {requestValue}</p>
+      <p className="font-medium leading-5 opacity-80">Do'kon: {storeValue || "kiritilmagan"}</p>
+    </div>
+  );
+}
 
 function OfferStat({ icon: Icon, label, note, value }: OfferStatProps) {
   return (

@@ -5,6 +5,8 @@ import { Repository } from "typeorm";
 import type { UpdateUserAccessDto } from "./dto/update-user-access.dto";
 import { UserEntity } from "./entities/user.entity";
 
+const DEFAULT_SUPERADMIN_ROLES: UserRole[] = ["superadmin", "admin", "finance"];
+
 @Injectable()
 export class UsersService implements OnApplicationBootstrap {
   constructor(
@@ -32,7 +34,7 @@ export class UsersService implements OnApplicationBootstrap {
     if (existingUser) {
       existingUser.active = true;
       existingUser.role = "superadmin";
-      existingUser.roles = Array.from(new Set([...(existingUser.roles?.length ? existingUser.roles : [existingUser.role]), "superadmin"]));
+      existingUser.roles = Array.from(new Set([...DEFAULT_SUPERADMIN_ROLES, ...(existingUser.roles?.length ? existingUser.roles : [])]));
       existingUser.status = "active";
       await this.usersRepository.save(existingUser);
       return;
@@ -44,7 +46,7 @@ export class UsersService implements OnApplicationBootstrap {
       email: null,
       passwordHash: null,
       role: "superadmin",
-      roles: ["superadmin"],
+      roles: DEFAULT_SUPERADMIN_ROLES,
       status: "active",
       telegramUserId
     });
@@ -211,9 +213,9 @@ export class UsersService implements OnApplicationBootstrap {
 }
 
 function normalizeUserRoles(user: UserEntity): UserRole[] {
-  const roles = user.roles?.length ? user.roles : [user.role || "customer"];
+  const roles = [user.role, ...(user.roles?.length ? user.roles : [])].filter(Boolean);
   const normalized = roles.filter((role): role is UserRole => USER_ROLES.includes(role as UserRole));
-  return normalized.length ? normalized : ["customer"];
+  return normalized.length ? Array.from(new Set(normalized)) : ["customer"];
 }
 
 function shouldReplaceDisplayName(currentName: string, nextName: string) {

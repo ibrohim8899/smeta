@@ -16,9 +16,10 @@ const PENDING_BROWSER_LOGIN_KEY = "smeta-pending-browser-login";
 type LoginViewProps = {
   onAuthenticated: (session: AuthSessionResponse) => void;
   onGuestRequest: () => void;
+  sessionMessage?: string | null;
 };
 
-export function LoginView({ onAuthenticated, onGuestRequest }: LoginViewProps) {
+export function LoginView({ onAuthenticated, onGuestRequest, sessionMessage }: LoginViewProps) {
   const [requestedRole, setRequestedRole] = useState<UserRole>("dealer");
   const [login, setLogin] = useState<BrowserLoginResponse | null>(null);
   const [status, setStatus] = useState("not_started");
@@ -178,6 +179,8 @@ export function LoginView({ onAuthenticated, onGuestRequest }: LoginViewProps) {
             <Send className="h-4 w-4" />
             Telegramga o'tish
           </button>
+
+          {sessionMessage ? <p className="mt-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">{sessionMessage}</p> : null}
 
           {login ? (
             <div className="mt-4 rounded-md border border-smeta-line bg-smeta-paper p-3">

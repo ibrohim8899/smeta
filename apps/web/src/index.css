@@ -114,6 +114,13 @@ textarea {
     inset 0 1px 0 rgb(255 255 255 / 0.18);
 }
 
+.smeta-input:disabled {
+  cursor: not-allowed;
+  border-color: rgb(var(--smeta-line) / 0.72);
+  background: rgb(var(--smeta-soft) / 0.72);
+  color: rgb(var(--smeta-muted));
+}
+
 .smeta-label {
   display: block;
   margin-bottom: 0.45rem;
@@ -155,6 +162,7 @@ textarea {
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
+  min-width: 0;
   border: 1px solid rgb(var(--smeta-line));
   border-radius: 0.9rem;
   background: rgb(var(--smeta-surface) / 0.72);
@@ -162,6 +170,28 @@ textarea {
   padding: 0.65rem 0.85rem;
   font-size: 0.8rem;
   font-weight: 800;
+  cursor: pointer;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    color 180ms ease,
+    transform 180ms ease;
+}
+
+.smeta-ghost-button:hover {
+  border-color: rgb(var(--smeta-clay) / 0.55);
+  background: rgb(var(--smeta-soft) / 0.8);
+  transform: translateY(-1px);
+}
+
+.smeta-ghost-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+  transform: none;
+}
+
+.smeta-ghost-button svg {
+  flex: 0 0 auto;
 }
 
 .smeta-table {

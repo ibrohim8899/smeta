@@ -37,9 +37,10 @@ import { AppShell } from "./AppShell";
 
 export function App() {
   const params = new URLSearchParams(window.location.search);
+  const telegramContext = parseTelegramContext(params.get("tgContext"));
   const guestToken = params.get("guestToken");
   const loginNonce = params.get("loginNonce");
-  const referralCode = params.get("ref");
+  const referralCode = params.get("ref") ?? (telegramContext?.kind === "referral" ? telegramContext.ref ?? null : null);
   const [activeView, setActiveView] = useState<ViewKey>("dashboard");
   const [selectedRequestId, setSelectedRequestId] = useState("");
   const [requests, setRequests] = useState<RequestSummary[]>([]);
@@ -47,6 +48,7 @@ export function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [session, setSession] = useState<AuthSessionResponse | null>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
+  const [sessionNotice, setSessionNotice] = useState<string | null>(null);
   const [publicCustomerFlow, setPublicCustomerFlow] = useState(false);
 
   async function loadRequests() {
@@ -85,20 +87,23 @@ export function App() {
 
           if (loginResult.status === "authenticated") {
             storeSessionToken(loginResult.accessToken);
-            setSession(loginResult.session);
-            setActiveView(navigationFallbackForRole(loginResult.session.role as UserRole));
+            const nextSession = await sessionForTelegramContext(loginResult.session, telegramContext);
+            setSession(nextSession);
+            setSessionNotice(null);
+            setActiveView(navigationFallbackForRole(nextSession.role as UserRole, telegramContext));
             window.history.replaceState({}, "", window.location.pathname);
             await loadRequests();
             return;
           }
         }
 
-        const currentSession = await fetchAuthSession();
+        const currentSession = await sessionForTelegramContext(await fetchAuthSession(), telegramContext);
         setSession(currentSession);
-        setActiveView(navigationFallbackForRole(currentSession.role as UserRole));
+        setSessionNotice(null);
+        setActiveView(navigationFallbackForRole(currentSession.role as UserRole, telegramContext));
         await loadRequests();
-      } catch {
-        clearSessionToken();
+      } catch (sessionError) {
+        setSessionNotice(sessionError instanceof Error ? normalizeSessionNotice(sessionError.message) : null);
         setSession(null);
       } finally {
         setSessionLoading(false);
@@ -113,8 +118,11 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    function handleSessionCleared() {
+    function handleSessionCleared(event: Event) {
+      const reason = event instanceof CustomEvent && typeof event.detail?.reason === "string" ? normalizeSessionNotice(event.detail.reason) : null;
+
       setSession(null);
+      setSessionNotice(reason);
       setRequests([]);
       setSelectedRequestId("");
     }
@@ -159,11 +167,12 @@ export function App() {
       );
     }
 
-    return <LoginView onAuthenticated={handleAuthenticated} onGuestRequest={() => setPublicCustomerFlow(true)} />;
+    return <LoginView onAuthenticated={handleAuthenticated} onGuestRequest={() => setPublicCustomerFlow(true)} sessionMessage={sessionNotice} />;
   }
 
   function handleAuthenticated(nextSession: AuthSessionResponse) {
     setSession(nextSession);
+    setSessionNotice(null);
     setActiveView(navigationFallbackForRole(nextSession.role as UserRole));
     void loadRequests();
   }
@@ -176,6 +185,7 @@ export function App() {
     }
 
     setSession(null);
+    setSessionNotice(null);
     setRequests([]);
     setSelectedRequestId("");
     setSearchQuery("");
@@ -185,6 +195,7 @@ export function App() {
     const result = await switchAuthRole(role);
     storeSessionToken(result.accessToken);
     setSession(result.session);
+    setSessionNotice(null);
     const firstAllowedView = navigationFallbackForRole(result.session.role as UserRole);
     setActiveView(firstAllowedView);
     await loadRequests();
@@ -218,7 +229,9 @@ export function App() {
       )}
       {activeView === "admin" && !selectedRequest && <EmptyRequestState onCreateRequest={() => setActiveView("customer")} />}
       {activeView === "stores" && <StoresView searchQuery={searchQuery} />}
-      {activeView === "store" && selectedRequest && <StoreOffersView searchQuery={searchQuery} selectedRequest={selectedRequest} />}
+      {activeView === "store" && selectedRequest && (
+        <StoreOffersView searchQuery={searchQuery} selectedRequest={selectedRequest} sessionRole={session.role} sessionTelegramUserId={session.telegramUserId} />
+      )}
       {activeView === "store" && !selectedRequest && <EmptyRequestState onCreateRequest={() => setActiveView("customer")} />}
       {activeView === "selection" && selectedRequest && <CustomerSelectionView selectedRequest={selectedRequest} onOrderCreated={loadRequests} />}
       {activeView === "selection" && !selectedRequest && <EmptyRequestState onCreateRequest={() => setActiveView("customer")} />}
@@ -232,7 +245,19 @@ export function App() {
   );
 }
 
-function navigationFallbackForRole(role: UserRole): ViewKey {
+type TelegramDeepLinkContext = {
+  kind?: string;
+  ref?: string;
+  role?: UserRole;
+};
+
+function navigationFallbackForRole(role: UserRole, telegramContext?: TelegramDeepLinkContext | null): ViewKey {
+  const contextView = navigationFromTelegramContext(role, telegramContext);
+
+  if (contextView) {
+    return contextView;
+  }
+
   const fallback: Record<UserRole, ViewKey> = {
     admin: "dashboard",
     customer: "customer",
@@ -243,6 +268,101 @@ function navigationFallbackForRole(role: UserRole): ViewKey {
   };
 
   return fallback[role];
+}
+
+async function sessionForTelegramContext(session: AuthSessionResponse, telegramContext?: TelegramDeepLinkContext | null) {
+  const requestedRole = telegramContext?.role;
+
+  if (!requestedRole || session.role === requestedRole) {
+    return session;
+  }
+
+  if (session.approvedRoles.includes(requestedRole)) {
+    const switchedSession = await switchAuthRole(requestedRole);
+    storeSessionToken(switchedSession.accessToken);
+    return switchedSession.session;
+  }
+
+  clearSessionToken("Bu Telegram havola boshqa rol uchun ochilgan. Iltimos, Telegram orqali qayta kiring.");
+  throw new Error("Bu Telegram havola boshqa rol uchun ochilgan. Iltimos, Telegram orqali qayta kiring.");
+}
+
+function navigationFromTelegramContext(role: UserRole, telegramContext?: TelegramDeepLinkContext | null): ViewKey | null {
+  if (!telegramContext?.kind || telegramContext.kind === "home" || telegramContext.kind === "login" || telegramContext.kind === "referral") {
+    return null;
+  }
+
+  if (telegramContext.kind === "order") {
+    return "orders";
+  }
+
+  if (telegramContext.kind === "finance") {
+    return role === "store" ? "store" : role === "dealer" ? "dealer" : "finance";
+  }
+
+  if (telegramContext.kind === "dealer") {
+    return role === "dealer" || role === "admin" || role === "superadmin" ? "dealer" : navigationFallbackForRole(role);
+  }
+
+  if (telegramContext.kind === "store") {
+    return role === "store" ? "store" : role === "admin" || role === "superadmin" ? "stores" : navigationFallbackForRole(role);
+  }
+
+  if (telegramContext.kind === "notifications" || telegramContext.kind === "support") {
+    return "notifications";
+  }
+
+  if (telegramContext.kind === "request") {
+    if (role === "store") {
+      return "store";
+    }
+
+    if (role === "dealer") {
+      return "dealer";
+    }
+
+    if (role === "admin" || role === "superadmin") {
+      return "admin";
+    }
+
+    return "customer";
+  }
+
+  return null;
+}
+
+function parseTelegramContext(token: string | null): TelegramDeepLinkContext | null {
+  if (!token) {
+    return null;
+  }
+
+  try {
+    const [payload] = token.split(".");
+
+    if (!payload) {
+      return null;
+    }
+
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
+    const parsed = JSON.parse(window.atob(padded)) as TelegramDeepLinkContext;
+
+    return typeof parsed.kind === "string" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeSessionNotice(message: string) {
+  if (message.includes("Sessiya tokeni") || message.includes("Sessiya roli") || message.includes("Sessiya topilmadi")) {
+    return "Sessiya topilmadi yoki bekor qilingan. Iltimos, Telegram orqali qayta kiring.";
+  }
+
+  if (message.includes("Sessiya muddati tugagan") || message.includes("muddati tugagan")) {
+    return "Sessiya muddati tugagan. Iltimos, Telegram orqali qayta kiring.";
+  }
+
+  return message;
 }
 
 function filterRequests(requests: RequestSummary[], query: string) {

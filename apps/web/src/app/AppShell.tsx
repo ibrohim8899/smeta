@@ -41,8 +41,8 @@ export function AppShell({ activeView, children, session, onLogout, onRoleSwitch
   return (
     <main className="min-h-screen bg-smeta-paper text-smeta-ink" data-theme={theme}>
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top_right,_rgb(var(--smeta-blush)/0.20),_transparent_34%),radial-gradient(circle_at_bottom_left,_rgb(var(--smeta-rose)/0.15),_transparent_32%)]" />
-      <div className="relative grid min-h-screen lg:grid-cols-[272px_1fr]">
-        <aside className="border-b border-smeta-line bg-smeta-deep px-4 py-4 text-white shadow-smeta lg:border-b-0 lg:border-r">
+      <div className="relative min-h-screen">
+        <aside className="border-b border-smeta-line bg-smeta-deep px-4 py-4 text-white shadow-smeta lg:fixed lg:left-0 lg:top-0 lg:z-20 lg:h-screen lg:w-[272px] lg:overflow-y-auto lg:border-b-0 lg:border-r">
           <div className="flex items-center justify-between lg:block">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-smeta-blush">Smeta Market</p>
@@ -72,7 +72,7 @@ export function AppShell({ activeView, children, session, onLogout, onRoleSwitch
           </nav>
         </aside>
 
-        <section className="min-w-0">
+        <section className="min-w-0 lg:ml-[272px]">
           <header className="sticky top-0 z-10 flex flex-col gap-4 border-b border-smeta-line bg-smeta-surface/90 px-5 py-4 backdrop-blur lg:flex-row lg:items-center lg:justify-between lg:px-7">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-smeta-mauve">Xarid jarayoni</p>
